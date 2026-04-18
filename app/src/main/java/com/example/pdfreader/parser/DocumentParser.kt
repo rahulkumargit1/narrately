@@ -2,8 +2,8 @@ package com.example.pdfreader.parser
 
 import android.content.Context
 import android.net.Uri
-import com.tomroush.pdfbox.pdmodel.PDDocument
-import com.tomroush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader

@@ -293,7 +293,6 @@ fun PlayerScreen(
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = Primary,
                             ),
-                            border = ButtonDefaults.outlinedButtonBorder(enabled = true),
                         ) {
                             Text(
                                 text = "${speeds[speedIndex]}x Speed",
@@ -316,7 +315,6 @@ fun PlayerScreen(
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = Secondary,
                             ),
-                            border = ButtonDefaults.outlinedButtonBorder(enabled = true),
                         ) {
                             Text(
                                 text = "Pitch ${pitches[pitchIndex]}",

@@ -1,7 +1,7 @@
 package com.example.pdfreader
 
 import android.app.Application
-import com.tomroush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import dagger.hilt.android.HiltAndroidApp
 
 @HiltAndroidApp
