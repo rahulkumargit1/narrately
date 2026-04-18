@@ -9,55 +9,58 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.pdfreader.ui.theme.PrimaryContainer
-import com.example.pdfreader.ui.theme.InversePrimary
-import com.example.pdfreader.ui.theme.Background
-import com.example.pdfreader.ui.theme.Primary
-import com.example.pdfreader.ui.theme.OnSurfaceVariant
+import com.example.pdfreader.ui.theme.*
 import kotlinx.coroutines.delay
 
 @Composable
 fun SplashScreen(onSplashFinished: () -> Unit) {
-    var startAnimation by remember { mutableStateOf(false) }
-    val alphaAnim = animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0f,
-        animationSpec = tween(durationMillis = 1500, easing = EaseOutCubic),
-        label = "alpha"
+    // Staggered fade-in for each element
+    var showTitle by remember { mutableStateOf(false) }
+    var showSubtitle by remember { mutableStateOf(false) }
+    var showCredit by remember { mutableStateOf(false) }
+
+    val titleAlpha by animateFloatAsState(
+        targetValue = if (showTitle) 1f else 0f,
+        animationSpec = tween(1200, easing = EaseOutCubic),
+        label = "titleAlpha",
     )
-    val scaleAnim = animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0.7f,
-        animationSpec = tween(durationMillis = 1200, easing = EaseOutBack),
-        label = "scale"
+    val subtitleAlpha by animateFloatAsState(
+        targetValue = if (showSubtitle) 1f else 0f,
+        animationSpec = tween(1000, easing = EaseOutCubic),
+        label = "subtitleAlpha",
     )
-    val creditAlpha = animateFloatAsState(
-        targetValue = if (startAnimation) 1f else 0f,
-        animationSpec = tween(durationMillis = 1000, delayMillis = 800, easing = EaseOutCubic),
-        label = "creditAlpha"
+    val creditAlpha by animateFloatAsState(
+        targetValue = if (showCredit) 1f else 0f,
+        animationSpec = tween(800, easing = EaseOutCubic),
+        label = "creditAlpha",
     )
 
-    // Pulsing glow animation
-    val infiniteTransition = rememberInfiniteTransition(label = "glow")
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.15f,
-        targetValue = 0.35f,
+    // Subtle breathing line
+    val infiniteTransition = rememberInfiniteTransition(label = "breathe")
+    val lineWidth by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.6f,
         animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = EaseInOutSine),
-            repeatMode = RepeatMode.Reverse
+            animation = tween(3000, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse,
         ),
-        label = "glowAlpha"
+        label = "lineWidth",
     )
 
     LaunchedEffect(Unit) {
-        startAnimation = true
-        delay(2800)
+        delay(300)
+        showTitle = true
+        delay(600)
+        showSubtitle = true
+        delay(400)
+        showCredit = true
+        delay(1800)
         onSplashFinished()
     }
 
@@ -65,66 +68,64 @@ fun SplashScreen(onSplashFinished: () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .background(Background),
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.Center,
     ) {
-        // Background glow orb
-        Box(
-            modifier = Modifier
-                .size(300.dp)
-                .alpha(glowAlpha)
-                .blur(80.dp)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            PrimaryContainer,
-                            Color.Transparent
-                        )
-                    )
-                )
-        )
-
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-                .alpha(alphaAnim.value)
-                .scale(scaleAnim.value)
+            modifier = Modifier.padding(horizontal = 48.dp),
         ) {
-            // App Name
+            // App name — clean, no glow, just weight and spacing
             Text(
                 text = "NARRATELY",
                 style = MaterialTheme.typography.displayLarge.copy(
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 6.sp,
-                    brush = Brush.linearGradient(
-                        colors = listOf(Primary, PrimaryContainer, InversePrimary)
-                    )
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 8.sp,
+                    fontSize = 40.sp,
                 ),
+                color = OnBackground.copy(alpha = titleAlpha),
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
+            // Breathing accent line
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(lineWidth)
+                    .height(2.dp)
+                    .alpha(titleAlpha)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Primary.copy(alpha = 0.8f),
+                                Color.Transparent,
+                            )
+                        )
+                    )
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Tagline
             Text(
-                text = "The Ethereal Library",
+                text = "Your documents, narrated.",
                 style = MaterialTheme.typography.bodyLarge,
-                color = OnSurfaceVariant.copy(alpha = 0.7f),
+                color = OnSurfaceVariant.copy(alpha = subtitleAlpha * 0.7f),
                 textAlign = TextAlign.Center,
             )
         }
 
-        // "Created by Rahul" at bottom
+        // Credit at bottom
         Text(
             text = "Created by Rahul",
             style = MaterialTheme.typography.labelSmall.copy(
-                letterSpacing = 3.sp,
-                fontWeight = FontWeight.Medium,
-                fontSize = 11.sp,
+                letterSpacing = 2.sp,
             ),
-            color = OnSurfaceVariant.copy(alpha = 0.5f),
+            color = OnSurfaceVariant.copy(alpha = creditAlpha * 0.4f),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 48.dp)
-                .alpha(creditAlpha.value)
+                .padding(bottom = 48.dp),
         )
     }
 }

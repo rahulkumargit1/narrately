@@ -3,6 +3,8 @@ package com.example.pdfreader.ui.screens
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -10,33 +12,32 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pdfreader.ui.theme.*
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PlayerScreen(
     documentTitle: String,
     textChunks: List<String>,
     currentChunkIndex: Int,
     isPlaying: Boolean,
+    isLoading: Boolean,
     playbackSpeed: Float,
     pitch: Float,
     onPlayPause: () -> Unit,
@@ -56,274 +57,270 @@ fun PlayerScreen(
         }
     }
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(Background)
     ) {
-        // Background glow for currently playing state
-        if (isPlaying) {
-            Box(
-                modifier = Modifier
-                    .size(400.dp)
-                    .align(Alignment.TopCenter)
-                    .offset(y = (-100).dp)
-                    .blur(120.dp)
-                    .background(
-                        Brush.radialGradient(
-                            colors = listOf(
-                                PrimaryContainer.copy(alpha = 0.08f),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
+        // ─── Top Bar ───
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    Icons.Default.KeyboardArrowDown,
+                    contentDescription = "Close",
+                    tint = OnSurfaceVariant,
+                    modifier = Modifier.size(28.dp),
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    text = "PLAYING FROM LIBRARY",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = OnSurfaceVariant.copy(alpha = 0.5f),
+                    letterSpacing = 1.sp,
+                    fontSize = 10.sp,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = documentTitle,
+                    style = MaterialTheme.typography.titleSmall,
+                    color = OnBackground,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // Spacer to balance the back button
+            Spacer(modifier = Modifier.size(48.dp))
         }
 
-        Column(modifier = Modifier.fillMaxSize()) {
-            // --- Top Bar ---
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
+        // ─── Loading State ───
+        if (isLoading) {
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center,
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.Default.ArrowBack,
-                        contentDescription = "Back",
-                        tint = OnSurfaceVariant,
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
+                CircularProgressIndicator(
+                    color = Primary,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+        } else if (textChunks.isEmpty()) {
+            // ─── Empty State ───
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("📄", fontSize = 48.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "NOW PLAYING",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Primary,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp,
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        text = documentTitle,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = OnBackground,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
+                        text = "No text content found",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = OnSurfaceVariant,
                     )
                 }
             }
-
-            // --- Reading Text Area (Karaoke Highlight) ---
+        } else {
+            // ─── Reading Area (Karaoke Highlight) ───
             LazyColumn(
                 state = listState,
                 modifier = Modifier
                     .weight(1f)
-                    .padding(horizontal = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(vertical = 24.dp),
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 20.dp),
             ) {
                 itemsIndexed(textChunks) { index, chunk ->
                     val isActive = index == currentChunkIndex
-                    val textColor = animateColorAsState(
+                    val textColor by animateColorAsState(
                         targetValue = when {
                             isActive -> OnBackground
-                            index < currentChunkIndex -> OnSurfaceVariant.copy(alpha = 0.35f)
-                            else -> OnSurfaceVariant.copy(alpha = 0.55f)
+                            index < currentChunkIndex -> OnSurfaceVariant.copy(alpha = 0.3f)
+                            else -> OnSurfaceVariant.copy(alpha = 0.5f)
                         },
-                        animationSpec = tween(400),
-                        label = "textColor"
+                        animationSpec = tween(350),
+                        label = "chunkColor",
                     )
 
                     Text(
                         text = chunk,
                         style = MaterialTheme.typography.bodyLarge.copy(
-                            lineHeight = 28.sp,
-                            fontWeight = if (isActive) FontWeight.Medium else FontWeight.Normal,
-                            fontSize = if (isActive) 17.sp else 16.sp,
+                            lineHeight = 26.sp,
+                            fontWeight = if (isActive) FontWeight.Normal else FontWeight.Normal,
+                            fontSize = 15.sp,
                         ),
-                        color = textColor.value,
+                        color = textColor,
                         modifier = Modifier
                             .fillMaxWidth()
                             .then(
                                 if (isActive) {
                                     Modifier
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(SurfaceContainerHigh.copy(alpha = 0.4f))
-                                        .padding(16.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(SurfaceContainerLow)
+                                        .padding(14.dp)
                                 } else {
-                                    Modifier.padding(horizontal = 16.dp)
+                                    Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
                                 }
-                            ),
+                            )
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                            ) { onSeekToChunk(index) },
                     )
                 }
             }
+        }
 
-            // --- Progress Indicator ---
-            if (textChunks.isNotEmpty()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp)
-                ) {
-                    Slider(
-                        value = currentChunkIndex.toFloat(),
-                        onValueChange = { onSeekToChunk(it.toInt()) },
-                        valueRange = 0f..(textChunks.size - 1).toFloat().coerceAtLeast(0f),
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = Primary,
-                            activeTrackColor = PrimaryContainer,
-                            inactiveTrackColor = SurfaceContainerHighest,
-                        )
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Text(
-                            text = "${currentChunkIndex + 1}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = OnSurfaceVariant,
-                        )
-                        Text(
-                            text = "${textChunks.size} chunks",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = OnSurfaceVariant,
-                        )
-                    }
-                }
-            }
-
-            // --- Playback Controls Panel (Glassmorphism) ---
-            Box(
+        // ─── Progress Slider ───
+        if (textChunks.isNotEmpty()) {
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
-                    .background(SurfaceContainer.copy(alpha = 0.6f))
-                    .padding(vertical = 24.dp, horizontal = 32.dp)
+                    .padding(horizontal = 24.dp)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    // Main controls
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // Rewind
-                        IconButton(
-                            onClick = onSeekBackward,
-                            modifier = Modifier.size(56.dp),
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("⏪", fontSize = 22.sp)
-                                Text(
-                                    "15s",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = OnSurfaceVariant,
-                                    fontSize = 9.sp,
-                                )
-                            }
-                        }
-
-                        // Play / Pause
-                        FilledIconButton(
-                            onClick = onPlayPause,
-                            modifier = Modifier.size(72.dp),
-                            shape = CircleShape,
-                            colors = IconButtonDefaults.filledIconButtonColors(
-                                containerColor = Color.Transparent,
-                            )
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(
-                                        Brush.linearGradient(
-                                            colors = listOf(PrimaryContainer, InversePrimary)
-                                        ),
-                                        shape = CircleShape
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = if (isPlaying) "⏸" else "▶",
-                                    fontSize = 28.sp,
-                                    color = OnPrimary,
-                                )
-                            }
-                        }
-
-                        // Forward
-                        IconButton(
-                            onClick = onSeekForward,
-                            modifier = Modifier.size(56.dp),
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("⏩", fontSize = 22.sp)
-                                Text(
-                                    "15s",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = OnSurfaceVariant,
-                                    fontSize = 9.sp,
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // --- Speed & Pitch Controls ---
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                    ) {
-                        // Speed button
-                        val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-                        var speedIndex by remember {
-                            mutableIntStateOf(speeds.indexOf(playbackSpeed).coerceAtLeast(2))
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                speedIndex = (speedIndex + 1) % speeds.size
-                                onSpeedChange(speeds[speedIndex])
-                            },
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Primary,
-                            ),
-                        ) {
-                            Text(
-                                text = "${speeds[speedIndex]}x Speed",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-
-                        // Pitch button
-                        val pitches = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f)
-                        var pitchIndex by remember {
-                            mutableIntStateOf(pitches.indexOf(pitch).coerceAtLeast(2))
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                pitchIndex = (pitchIndex + 1) % pitches.size
-                                onPitchChange(pitches[pitchIndex])
-                            },
-                            shape = RoundedCornerShape(50),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = Secondary,
-                            ),
-                        ) {
-                            Text(
-                                text = "Pitch ${pitches[pitchIndex]}",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                    }
+                // Thin Apple Music-style slider
+                Slider(
+                    value = if (textChunks.isNotEmpty()) {
+                        currentChunkIndex.toFloat() / (textChunks.size - 1).coerceAtLeast(1).toFloat()
+                    } else 0f,
+                    onValueChange = { fraction ->
+                        val idx = (fraction * (textChunks.size - 1)).toInt()
+                        onSeekToChunk(idx)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = SliderDefaults.colors(
+                        thumbColor = OnBackground,
+                        activeTrackColor = OnBackground,
+                        inactiveTrackColor = SurfaceContainerHighest,
+                    ),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "${currentChunkIndex + 1}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariant.copy(alpha = 0.5f),
+                        fontSize = 10.sp,
+                    )
+                    Text(
+                        text = "${textChunks.size}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = OnSurfaceVariant.copy(alpha = 0.5f),
+                        fontSize = 10.sp,
+                    )
                 }
+            }
+        }
+
+        // ─── Playback Controls ───
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 48.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Previous
+            IconButton(
+                onClick = onSeekBackward,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Icon(
+                    Icons.Default.SkipPrevious,
+                    contentDescription = "Previous",
+                    tint = OnBackground,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+
+            // Play / Pause — large center button
+            IconButton(
+                onClick = onPlayPause,
+                modifier = Modifier
+                    .size(68.dp)
+                    .clip(CircleShape)
+                    .background(OnBackground),
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = Background,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+
+            // Next
+            IconButton(
+                onClick = onSeekForward,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Icon(
+                    Icons.Default.SkipNext,
+                    contentDescription = "Next",
+                    tint = OnBackground,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+        }
+
+        // ─── Speed & Pitch Controls ───
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 48.dp)
+                .padding(bottom = 24.dp)
+                .navigationBarsPadding(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            // Speed button — reflects ViewModel state
+            val speeds = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+            val currentSpeedIndex = speeds.indexOf(playbackSpeed).let {
+                if (it < 0) 2 else it  // default to 1.0x
+            }
+            TextButton(
+                onClick = {
+                    val nextIndex = (currentSpeedIndex + 1) % speeds.size
+                    onSpeedChange(speeds[nextIndex])
+                },
+            ) {
+                Text(
+                    text = "${playbackSpeed}x",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (playbackSpeed != 1.0f) Primary else OnSurfaceVariant,
+                )
+            }
+
+            // Pitch button — reflects ViewModel state
+            val pitches = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f)
+            val currentPitchIndex = pitches.indexOf(pitch).let {
+                if (it < 0) 2 else it
+            }
+            TextButton(
+                onClick = {
+                    val nextIndex = (currentPitchIndex + 1) % pitches.size
+                    onPitchChange(pitches[nextIndex])
+                },
+            ) {
+                Text(
+                    text = "Pitch ${pitch}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (pitch != 1.0f) Secondary else OnSurfaceVariant,
+                )
             }
         }
     }

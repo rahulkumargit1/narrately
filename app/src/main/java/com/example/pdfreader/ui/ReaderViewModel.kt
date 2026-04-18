@@ -24,23 +24,21 @@ class ReaderViewModel @Inject constructor(
     private val documentParser = DocumentParser(application.applicationContext)
     val ttsManager = TTSManager(application.applicationContext)
 
-    // All documents in the library
+    // ─── Library ───
     val libraryDocuments: StateFlow<List<DocumentEntity>> = readerDao.getAllDocuments()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
-    // Progress map
     private val _progressMap = MutableStateFlow<Map<Int, ProgressEntity>>(emptyMap())
     val progressMap: StateFlow<Map<Int, ProgressEntity>> = _progressMap.asStateFlow()
 
-    // Currently active document
+    // ─── Active document ───
     private val _currentDocument = MutableStateFlow<DocumentEntity?>(null)
     val currentDocument: StateFlow<DocumentEntity?> = _currentDocument.asStateFlow()
 
-    // Extracted text chunks for the active document
     private val _textChunks = MutableStateFlow<List<String>>(emptyList())
     val textChunks: StateFlow<List<String>> = _textChunks.asStateFlow()
 
-    // Playback state
+    // ─── Playback (delegated to TTSManager) ───
     val isPlaying: StateFlow<Boolean> = ttsManager.isPlaying
     val currentChunkIndex: StateFlow<Int> = ttsManager.currentSentenceIndex
 
@@ -50,16 +48,15 @@ class ReaderViewModel @Inject constructor(
     private val _pitch = MutableStateFlow(1.0f)
     val pitch: StateFlow<Float> = _pitch.asStateFlow()
 
-    // Loading
+    // ─── UI state ───
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
-    // Error
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
     init {
-        // Load progress for all documents
+        // Keep progress map in sync with documents
         viewModelScope.launch {
             libraryDocuments.collect { docs ->
                 val map = mutableMapOf<Int, ProgressEntity>()
@@ -71,14 +68,21 @@ class ReaderViewModel @Inject constructor(
                 _progressMap.value = map
             }
         }
+
+        // Auto-save progress on every chunk change
+        viewModelScope.launch {
+            currentChunkIndex.collect {
+                saveCurrentProgress()
+            }
+        }
     }
 
     fun importDocument(uri: Uri) {
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
-            
-            // Take persistable URI permission so we can read it later
+
+            // Take persistable read permission
             try {
                 getApplication<Application>().contentResolver.takePersistableUriPermission(
                     uri,
@@ -96,7 +100,6 @@ class ReaderViewModel @Inject constructor(
                     )
                     val id = readerDao.insertDocument(newDoc).toInt()
 
-                    // Save initial progress
                     readerDao.saveProgress(
                         ProgressEntity(
                             documentId = id,
@@ -116,33 +119,30 @@ class ReaderViewModel @Inject constructor(
     fun openDocument(document: DocumentEntity) {
         viewModelScope.launch {
             _isLoading.value = true
+            _errorMessage.value = null
             _currentDocument.value = document
 
             val uri = Uri.parse(document.fileUri)
             when (val result = documentParser.parseDocument(uri)) {
                 is ParseResult.Success -> {
                     _textChunks.value = result.chunks
-
-                    // Resume from saved progress
                     val progress = readerDao.getProgressForDocument(document.id)
                     val startIndex = progress?.currentChunkIndex ?: 0
-
                     ttsManager.loadText(result.chunks, startIndex)
                 }
                 is ParseResult.Error -> {
                     _errorMessage.value = result.exception.message ?: "Failed to open document"
+                    _textChunks.value = emptyList()
                 }
             }
             _isLoading.value = false
         }
     }
 
+    // ─── Playback controls ───
+
     fun playPause() {
-        if (isPlaying.value) {
-            ttsManager.pause()
-        } else {
-            ttsManager.play()
-        }
+        if (isPlaying.value) ttsManager.pause() else ttsManager.play()
     }
 
     fun seekForward() {
@@ -169,10 +169,21 @@ class ReaderViewModel @Inject constructor(
         ttsManager.setPitch(p)
     }
 
+    // ─── Document management ───
+
     fun deleteDocument(document: DocumentEntity) {
         viewModelScope.launch {
             readerDao.deleteDocument(document.id)
+            readerDao.deleteProgress(document.id)
         }
+    }
+
+    fun clearError() {
+        _errorMessage.value = null
+    }
+
+    fun stopPlayback() {
+        ttsManager.pause()
     }
 
     fun saveCurrentProgress() {

@@ -3,6 +3,7 @@ package com.example.pdfreader
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -10,7 +11,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.pdfreader.data.DocumentEntity
 import com.example.pdfreader.ui.ReaderViewModel
 import com.example.pdfreader.ui.screens.LibraryScreen
 import com.example.pdfreader.ui.screens.PlayerScreen
@@ -23,6 +23,7 @@ enum class Screen { SPLASH, LIBRARY, PLAYER }
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
             LumenTheme {
@@ -42,7 +43,7 @@ fun NarratelyApp() {
     val viewModel: ReaderViewModel = hiltViewModel()
     var currentScreen by remember { mutableStateOf(Screen.SPLASH) }
 
-    // Collect states
+    // Collect all states
     val documents by viewModel.libraryDocuments.collectAsState()
     val progressMap by viewModel.progressMap.collectAsState()
     val currentDocument by viewModel.currentDocument.collectAsState()
@@ -51,19 +52,21 @@ fun NarratelyApp() {
     val isPlaying by viewModel.isPlaying.collectAsState()
     val playbackSpeed by viewModel.playbackSpeed.collectAsState()
     val pitch by viewModel.pitch.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val errorMessage by viewModel.errorMessage.collectAsState()
 
     AnimatedContent(
         targetState = currentScreen,
         transitionSpec = {
             if (targetState.ordinal > initialState.ordinal) {
-                slideInHorizontally { it } + fadeIn() togetherWith
-                    slideOutHorizontally { -it } + fadeOut()
+                slideInVertically { it / 3 } + fadeIn(tween(300)) togetherWith
+                    slideOutVertically { -it / 6 } + fadeOut(tween(200))
             } else {
-                slideInHorizontally { -it } + fadeIn() togetherWith
-                    slideOutHorizontally { it } + fadeOut()
+                slideInVertically { -it / 6 } + fadeIn(tween(300)) togetherWith
+                    slideOutVertically { it / 3 } + fadeOut(tween(200))
             }
         },
-        label = "screenTransition"
+        label = "screenTransition",
     ) { screen ->
         when (screen) {
             Screen.SPLASH -> {
@@ -76,16 +79,15 @@ fun NarratelyApp() {
                 LibraryScreen(
                     documents = documents,
                     progressMap = progressMap,
-                    onImportDocument = { uri ->
-                        viewModel.importDocument(uri)
-                    },
+                    isLoading = isLoading,
+                    errorMessage = errorMessage,
+                    onImportDocument = { uri -> viewModel.importDocument(uri) },
                     onDocumentClick = { doc ->
                         viewModel.openDocument(doc)
                         currentScreen = Screen.PLAYER
                     },
-                    onDeleteDocument = { doc ->
-                        viewModel.deleteDocument(doc)
-                    },
+                    onDeleteDocument = { doc -> viewModel.deleteDocument(doc) },
+                    onClearError = { viewModel.clearError() },
                 )
             }
 
@@ -95,6 +97,7 @@ fun NarratelyApp() {
                     textChunks = textChunks,
                     currentChunkIndex = currentChunkIndex,
                     isPlaying = isPlaying,
+                    isLoading = isLoading,
                     playbackSpeed = playbackSpeed,
                     pitch = pitch,
                     onPlayPause = { viewModel.playPause() },
@@ -105,7 +108,7 @@ fun NarratelyApp() {
                     onSeekToChunk = { viewModel.seekToChunk(it) },
                     onBack = {
                         viewModel.saveCurrentProgress()
-                        viewModel.ttsManager.pause()
+                        viewModel.stopPlayback()
                         currentScreen = Screen.LIBRARY
                     },
                 )
