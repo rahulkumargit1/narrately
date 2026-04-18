@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Narrately app icon — coral waveform on black -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Background -->
+    <path
+        android:fillColor="#0A0A0A"
+        android:pathData="M0,0h108v108H0z" />
+    <!-- Waveform bars — coral accent -->
+    <path
+        android:fillColor="#FA2D48"
+        android:pathData="M34,58 L34,50 Q34,48 36,48 L36,48 Q38,48 38,50 L38,58 Q38,60 36,60 L36,60 Q34,60 34,58 Z" />
+    <path
+        android:fillColor="#FA2D48"
+        android:pathData="M42,64 L42,44 Q42,42 44,42 L44,42 Q46,42 46,44 L46,64 Q46,66 44,66 L44,66 Q42,66 42,64 Z" />
+    <path
+        android:fillColor="#FA2D48"
+        android:pathData="M50,70 L50,38 Q50,36 52,36 L52,36 Q54,36 54,38 L54,70 Q54,72 52,72 L52,72 Q50,72 50,70 Z" />
+    <path
+        android:fillColor="#FA2D48"
+        android:pathData="M58,66 L58,42 Q58,40 60,40 L60,40 Q62,40 62,42 L62,66 Q62,68 60,68 L60,68 Q58,68 58,66 Z" />
+    <path
+        android:fillColor="#FA2D48"
+        android:pathData="M66,60 L66,48 Q66,46 68,46 L68,46 Q70,46 70,48 L70,60 Q70,62 68,62 L68,62 Q66,62 66,60 Z" />
+    <path
+        android:fillColor="#FA2D48"
+        android:pathData="M74,56 L74,52 Q74,50 76,50 L76,50 Q78,50 78,52 L78,56 Q78,58 76,58 L76,58 Q74,58 74,56 Z" />
+</vector>
