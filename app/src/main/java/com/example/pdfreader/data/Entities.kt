@@ -1,0 +1,21 @@
+package com.example.pdfreader.data
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+@Entity(tableName = "documents")
+data class DocumentEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val title: String,
+    val fileUri: String,
+    val mimeType: String,
+    val addedTimestamp: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "reading_progress")
+data class ProgressEntity(
+    @PrimaryKey val documentId: Int,
+    val currentChunkIndex: Int,
+    val totalChunks: Int,
+    val lastReadTimestamp: Long = System.currentTimeMillis()
+)
