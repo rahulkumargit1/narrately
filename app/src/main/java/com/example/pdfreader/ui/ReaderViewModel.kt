@@ -38,7 +38,7 @@ class ReaderViewModel @Inject constructor(
     private val _textChunks = MutableStateFlow<List<String>>(emptyList())
     val textChunks: StateFlow<List<String>> = _textChunks.asStateFlow()
 
-    // ─── Playback (delegated to TTSManager) ───
+    // ─── Playback ───
     val isPlaying: StateFlow<Boolean> = ttsManager.isPlaying
     val currentChunkIndex: StateFlow<Int> = ttsManager.currentSentenceIndex
 
@@ -55,25 +55,34 @@ class ReaderViewModel @Inject constructor(
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()
 
+    // ─── Reading stats ───
+    val totalWordCount: StateFlow<Int> = _textChunks.map { chunks ->
+        chunks.sumOf { it.split("\\s+".toRegex()).count { w -> w.isNotBlank() } }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
+
+    val estimatedMinutes: StateFlow<Int> = totalWordCount.map { words ->
+        // Average reading speed ~200 WPM for TTS at 1x
+        (words / 200.0).toInt().coerceAtLeast(1)
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 1)
+
+    val progressPercent: StateFlow<Int> = combine(currentChunkIndex, _textChunks) { idx, chunks ->
+        if (chunks.isEmpty()) 0
+        else ((idx.toFloat() / chunks.size) * 100).toInt().coerceIn(0, 100)
+    }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
+
     init {
-        // Keep progress map in sync with documents
         viewModelScope.launch {
             libraryDocuments.collect { docs ->
                 val map = mutableMapOf<Int, ProgressEntity>()
                 for (doc in docs) {
-                    readerDao.getProgressForDocument(doc.id)?.let {
-                        map[doc.id] = it
-                    }
+                    readerDao.getProgressForDocument(doc.id)?.let { map[doc.id] = it }
                 }
                 _progressMap.value = map
             }
         }
-
-        // Auto-save progress on every chunk change
+        // Auto-save on chunk change
         viewModelScope.launch {
-            currentChunkIndex.collect {
-                saveCurrentProgress()
-            }
+            currentChunkIndex.collect { saveCurrentProgress() }
         }
     }
 
@@ -81,32 +90,18 @@ class ReaderViewModel @Inject constructor(
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
-
-            // Take persistable read permission
             try {
                 getApplication<Application>().contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 )
             } catch (_: Exception) { }
 
             when (val result = documentParser.parseDocument(uri)) {
                 is ParseResult.Success -> {
                     val mimeType = getApplication<Application>().contentResolver.getType(uri) ?: "unknown"
-                    val newDoc = DocumentEntity(
-                        title = result.title,
-                        fileUri = uri.toString(),
-                        mimeType = mimeType,
-                    )
+                    val newDoc = DocumentEntity(title = result.title, fileUri = uri.toString(), mimeType = mimeType)
                     val id = readerDao.insertDocument(newDoc).toInt()
-
-                    readerDao.saveProgress(
-                        ProgressEntity(
-                            documentId = id,
-                            currentChunkIndex = 0,
-                            totalChunks = result.chunks.size,
-                        )
-                    )
+                    readerDao.saveProgress(ProgressEntity(documentId = id, currentChunkIndex = 0, totalChunks = result.chunks.size))
                 }
                 is ParseResult.Error -> {
                     _errorMessage.value = result.exception.message ?: "Failed to parse document"
@@ -140,7 +135,6 @@ class ReaderViewModel @Inject constructor(
     }
 
     // ─── Playback controls ───
-
     fun playPause() {
         if (isPlaying.value) ttsManager.pause() else ttsManager.play()
     }
@@ -155,21 +149,17 @@ class ReaderViewModel @Inject constructor(
         ttsManager.seekTo(prev)
     }
 
-    fun seekToChunk(index: Int) {
-        ttsManager.seekTo(index)
-    }
+    fun seekToChunk(index: Int) { ttsManager.seekTo(index) }
 
     fun setSpeed(speed: Float) {
         _playbackSpeed.value = speed
-        ttsManager.setSpeed(speed)
+        ttsManager.setSpeed(speed)  // Instant — re-speaks if playing
     }
 
     fun setPitch(p: Float) {
         _pitch.value = p
-        ttsManager.setPitch(p)
+        ttsManager.setPitch(p)  // Instant — re-speaks if playing
     }
-
-    // ─── Document management ───
 
     fun deleteDocument(document: DocumentEntity) {
         viewModelScope.launch {
@@ -178,26 +168,19 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    fun clearError() {
-        _errorMessage.value = null
-    }
-
-    fun stopPlayback() {
-        ttsManager.pause()
-    }
+    fun clearError() { _errorMessage.value = null }
+    fun stopPlayback() { ttsManager.pause() }
 
     fun saveCurrentProgress() {
         viewModelScope.launch {
             val doc = _currentDocument.value ?: return@launch
             val chunks = _textChunks.value
             if (chunks.isNotEmpty()) {
-                readerDao.saveProgress(
-                    ProgressEntity(
-                        documentId = doc.id,
-                        currentChunkIndex = currentChunkIndex.value,
-                        totalChunks = chunks.size,
-                    )
-                )
+                readerDao.saveProgress(ProgressEntity(
+                    documentId = doc.id,
+                    currentChunkIndex = currentChunkIndex.value,
+                    totalChunks = chunks.size,
+                ))
             }
         }
     }

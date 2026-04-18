@@ -55,27 +55,27 @@ fun NarratelyApp() {
     val pitch by viewModel.pitch.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
+    val totalWords by viewModel.totalWordCount.collectAsState()
+    val estimatedMinutes by viewModel.estimatedMinutes.collectAsState()
+    val progressPercent by viewModel.progressPercent.collectAsState()
 
     AnimatedContent(
         targetState = currentScreen,
         transitionSpec = {
             if (targetState.ordinal > initialState.ordinal) {
-                slideInVertically { it / 3 } + fadeIn(tween(300)) togetherWith
-                    slideOutVertically { -it / 6 } + fadeOut(tween(200))
+                slideInVertically { it / 4 } + fadeIn(tween(350)) togetherWith
+                    slideOutVertically { -it / 8 } + fadeOut(tween(200))
             } else {
-                slideInVertically { -it / 6 } + fadeIn(tween(300)) togetherWith
-                    slideOutVertically { it / 3 } + fadeOut(tween(200))
+                slideInVertically { -it / 8 } + fadeIn(tween(350)) togetherWith
+                    slideOutVertically { it / 4 } + fadeOut(tween(200))
             }
         },
         label = "screenTransition",
     ) { screen ->
         when (screen) {
             Screen.SPLASH -> {
-                SplashScreen(onSplashFinished = {
-                    currentScreen = Screen.LIBRARY
-                })
+                SplashScreen(onSplashFinished = { currentScreen = Screen.LIBRARY })
             }
-
             Screen.LIBRARY -> {
                 LibraryScreen(
                     documents = documents,
@@ -83,15 +83,11 @@ fun NarratelyApp() {
                     isLoading = isLoading,
                     errorMessage = errorMessage,
                     onImportDocument = { uri -> viewModel.importDocument(uri) },
-                    onDocumentClick = { doc ->
-                        viewModel.openDocument(doc)
-                        currentScreen = Screen.PLAYER
-                    },
+                    onDocumentClick = { doc -> viewModel.openDocument(doc); currentScreen = Screen.PLAYER },
                     onDeleteDocument = { doc -> viewModel.deleteDocument(doc) },
                     onClearError = { viewModel.clearError() },
                 )
             }
-
             Screen.PLAYER -> {
                 PlayerScreen(
                     documentTitle = currentDocument?.title ?: "Document",
@@ -101,6 +97,9 @@ fun NarratelyApp() {
                     isLoading = isLoading,
                     playbackSpeed = playbackSpeed,
                     pitch = pitch,
+                    totalWords = totalWords,
+                    estimatedMinutes = estimatedMinutes,
+                    progressPercent = progressPercent,
                     onPlayPause = { viewModel.playPause() },
                     onSeekForward = { viewModel.seekForward() },
                     onSeekBackward = { viewModel.seekBackward() },

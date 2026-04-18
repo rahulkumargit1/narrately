@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -16,11 +17,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -47,9 +51,7 @@ fun LibraryScreen(
 ) {
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { onImportDocument(it) }
-    }
+    ) { uri: Uri? -> uri?.let { onImportDocument(it) } }
 
     val greeting = remember {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
@@ -60,47 +62,41 @@ fun LibraryScreen(
         }
     }
 
-    // Snackbar for errors
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(errorMessage) {
-        errorMessage?.let {
-            snackbarHostState.showSnackbar(it)
-            onClearError()
-        }
+        errorMessage?.let { snackbarHostState.showSnackbar(it); onClearError() }
     }
 
-    // Delete confirmation dialog
+    // Delete confirmation
     var documentToDelete by remember { mutableStateOf<DocumentEntity?>(null) }
     if (documentToDelete != null) {
         AlertDialog(
             onDismissRequest = { documentToDelete = null },
-            title = {
-                Text("Delete Document", fontWeight = FontWeight.Bold)
-            },
-            text = {
-                Text("Remove \"${documentToDelete!!.title}\" from your library? This cannot be undone.")
-            },
+            title = { Text("Delete Document", fontWeight = FontWeight.Bold) },
+            text = { Text("Remove \"${documentToDelete!!.title}\" from your library?") },
             confirmButton = {
                 TextButton(
-                    onClick = {
-                        documentToDelete?.let { onDeleteDocument(it) }
-                        documentToDelete = null
-                    },
+                    onClick = { documentToDelete?.let { onDeleteDocument(it) }; documentToDelete = null },
                     colors = ButtonDefaults.textButtonColors(contentColor = Error),
-                ) {
-                    Text("Delete", fontWeight = FontWeight.SemiBold)
-                }
+                ) { Text("Delete", fontWeight = FontWeight.SemiBold) }
             },
-            dismissButton = {
-                TextButton(onClick = { documentToDelete = null }) {
-                    Text("Cancel")
-                }
-            },
-            containerColor = SurfaceContainer,
+            dismissButton = { TextButton(onClick = { documentToDelete = null }) { Text("Cancel") } },
+            containerColor = SurfaceContainerHigh,
             titleContentColor = OnBackground,
             textContentColor = OnSurfaceVariant,
+            shape = RoundedCornerShape(20.dp),
         )
     }
+
+    // Ambient glow animation
+    val infiniteTransition = rememberInfiniteTransition(label = "ambient")
+    val glowOffset by infiniteTransition.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(8000, easing = EaseInOutSine),
+            repeatMode = RepeatMode.Reverse,
+        ), label = "glowOffset",
+    )
 
     Scaffold(
         snackbarHost = {
@@ -110,23 +106,47 @@ fun LibraryScreen(
                     containerColor = SurfaceContainerHigh,
                     contentColor = OnBackground,
                     actionColor = Primary,
+                    shape = RoundedCornerShape(14.dp),
                 )
             }
         },
         containerColor = Background,
         floatingActionButton = {
+            // Glassmorphism FAB
             FloatingActionButton(
                 onClick = { filePickerLauncher.launch(arrayOf("application/pdf", "text/plain")) },
                 containerColor = Primary,
                 contentColor = OnPrimary,
                 shape = CircleShape,
-                modifier = Modifier.padding(bottom = 8.dp),
+                modifier = Modifier
+                    .padding(bottom = 8.dp)
+                    .size(60.dp),
+                elevation = FloatingActionButtonDefaults.elevation(8.dp),
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Import document")
+                Icon(Icons.Default.Add, "Import document", modifier = Modifier.size(26.dp))
             }
         },
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+            // Ambient background glow
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .drawBehind {
+                        val x = size.width * (0.2f + glowOffset * 0.6f)
+                        val y = size.height * 0.15f
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(PrimaryGlow, Color.Transparent),
+                                center = Offset(x, y),
+                                radius = size.width * 0.5f,
+                            ),
+                            radius = size.width * 0.5f,
+                            center = Offset(x, y),
+                        )
+                    }
+            )
+
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 96.dp),
@@ -136,63 +156,53 @@ fun LibraryScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 8.dp)
+                            .statusBarsPadding()
+                            .padding(start = 24.dp, end = 24.dp, top = 16.dp, bottom = 4.dp)
                     ) {
                         Text(
                             text = greeting,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = OnSurfaceVariant,
+                            color = OnSurfaceVariant.copy(alpha = 0.7f),
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Listen Now",
-                            style = MaterialTheme.typography.headlineLarge,
+                            style = MaterialTheme.typography.headlineLarge.copy(fontSize = 34.sp),
                             color = OnBackground,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                 }
 
-                // ─── Recently Read (horizontal scroll) ───
+                // ─── Recently Read (horizontal glass cards) ───
                 if (documents.isNotEmpty()) {
                     item {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Continue Listening",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = OnBackground,
-                            modifier = Modifier.padding(horizontal = 24.dp),
-                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        SectionHeader("Continue Listening")
                         Spacer(modifier = Modifier.height(12.dp))
                     }
-
                     item {
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 24.dp),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            items(documents.take(6)) { doc ->
-                                RecentlyReadCard(
-                                    document = doc,
-                                    progress = progressMap[doc.id],
-                                    onClick = { onDocumentClick(doc) },
-                                )
+                            items(documents.take(8)) { doc ->
+                                RecentlyReadCard(doc, progressMap[doc.id]) { onDocumentClick(doc) }
                             }
                         }
                     }
                 }
 
-                // ─── Your Library list ───
+                // ─── Library stats ───
                 item {
-                    Spacer(modifier = Modifier.height(28.dp))
-                    Text(
-                        text = "Your Library",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = OnBackground,
-                        modifier = Modifier.padding(horizontal = 24.dp),
-                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    GlassStatsBar(documents.size)
+                }
+
+                // ─── Full Library ───
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    SectionHeader("Your Library")
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
@@ -201,29 +211,60 @@ fun LibraryScreen(
                 }
 
                 items(documents) { doc ->
-                    LibraryListItem(
-                        document = doc,
-                        progress = progressMap[doc.id],
-                        onClick = { onDocumentClick(doc) },
-                        onDelete = { documentToDelete = doc },
-                    )
+                    LibraryListItem(doc, progressMap[doc.id], { onDocumentClick(doc) }, { documentToDelete = doc })
                 }
             }
 
-            // Loading overlay
             if (isLoading) {
                 Box(
-                    modifier = Modifier.fillMaxSize().background(Background.copy(alpha = 0.6f)),
+                    modifier = Modifier.fillMaxSize().background(Background.copy(alpha = 0.7f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(
-                        color = Primary,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(40.dp),
-                    )
+                    CircularProgressIndicator(color = Primary, strokeWidth = 2.5.dp, modifier = Modifier.size(36.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = OnBackground,
+        modifier = Modifier.padding(horizontal = 24.dp),
+    )
+}
+
+// ─── Glass Stats Bar ───
+@Composable
+private fun GlassStatsBar(documentCount: Int) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(GlassSurface)
+            .border(1.dp, GlassBorder, RoundedCornerShape(16.dp))
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.SpaceEvenly,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        StatItem(value = "$documentCount", label = "Documents")
+        Box(modifier = Modifier.width(1.dp).height(28.dp).background(GlassBorder))
+        StatItem(value = "${documentCount * 12}", label = "Pages Est.")
+        Box(modifier = Modifier.width(1.dp).height(28.dp).background(GlassBorder))
+        StatItem(value = "∞", label = "To Explore")
+    }
+}
+
+@Composable
+private fun StatItem(value: String, label: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(text = value, style = MaterialTheme.typography.titleLarge, color = OnBackground, fontWeight = FontWeight.Bold)
+        Text(text = label, style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant.copy(alpha = 0.6f))
     }
 }
 
@@ -233,27 +274,23 @@ private fun EmptyLibraryState() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 48.dp, vertical = 60.dp),
+            .padding(horizontal = 48.dp, vertical = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("📖", fontSize = 56.sp)
+        Icon(
+            Icons.Rounded.LibraryMusic,
+            contentDescription = null,
+            tint = OnSurfaceVariant.copy(alpha = 0.3f),
+            modifier = Modifier.size(64.dp),
+        )
         Spacer(modifier = Modifier.height(20.dp))
-        Text(
-            text = "Your library is empty",
-            style = MaterialTheme.typography.titleMedium,
-            color = OnSurfaceVariant,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "Import a PDF or text file to start listening",
-            style = MaterialTheme.typography.bodySmall,
-            color = OnSurfaceVariant.copy(alpha = 0.6f),
-        )
+        Text("Your library is empty", style = MaterialTheme.typography.titleMedium, color = OnSurfaceVariant, fontWeight = FontWeight.SemiBold)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text("Tap + to import a PDF or text file", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant.copy(alpha = 0.5f))
     }
 }
 
-// ─── Recently Read Card ───
+// ─── Recently Read Card (Glassmorphism) ───
 @Composable
 private fun RecentlyReadCard(
     document: DocumentEntity,
@@ -265,74 +302,69 @@ private fun RecentlyReadCard(
     } else 0
 
     val isPdf = document.title.endsWith(".pdf", ignoreCase = true)
-    // Each file type gets a distinct gradient so cards look different
-    val gradientColors = if (isPdf) {
-        listOf(Color(0xFF2C1810), Color(0xFF1A0F0A))
-    } else {
-        listOf(Color(0xFF0F1A2C), Color(0xFF0A0F1A))
-    }
+    // Unique gradients per document using hash
+    val gradients = listOf(
+        listOf(Primary.copy(alpha = 0.25f), Color(0xFF1A0A0E)),
+        listOf(AccentPurple.copy(alpha = 0.25f), Color(0xFF120A1A)),
+        listOf(AccentTeal.copy(alpha = 0.25f), Color(0xFF0A1A12)),
+        listOf(AccentIndigo.copy(alpha = 0.25f), Color(0xFF0E0A1A)),
+        listOf(AccentOrange.copy(alpha = 0.25f), Color(0xFF1A120A)),
+        listOf(Secondary.copy(alpha = 0.25f), Color(0xFF0A121A)),
+    )
+    val gradient = gradients[document.id % gradients.size]
 
-    Card(
+    Column(
         modifier = Modifier
-            .width(180.dp)
+            .width(170.dp)
+            .clip(RoundedCornerShape(18.dp))
             .clickable { onClick() },
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.Transparent),
     ) {
-        Column {
-            // Cover art area
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .background(Brush.verticalGradient(gradientColors), RoundedCornerShape(16.dp)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = if (isPdf) "PDF" else "TXT",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isPdf) Primary.copy(alpha = 0.4f) else Secondary.copy(alpha = 0.4f),
-                )
+        // Cover art — unique gradient per doc
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(Brush.verticalGradient(gradient))
+                .border(1.dp, GlassBorder, RoundedCornerShape(18.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (isPdf) "PDF" else "TXT",
+                style = MaterialTheme.typography.headlineLarge.copy(fontSize = 28.sp),
+                fontWeight = FontWeight.Bold,
+                color = OnBackground.copy(alpha = 0.15f),
+            )
 
-                // Progress pill
-                if (progressPercent > 0) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(10.dp)
-                            .background(
-                                Background.copy(alpha = 0.75f),
-                                RoundedCornerShape(50),
-                            )
-                            .padding(horizontal = 8.dp, vertical = 3.dp),
-                    ) {
-                        Text(
-                            text = "${progressPercent}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = OnBackground,
-                            fontSize = 10.sp,
-                        )
-                    }
+            // Progress pill
+            if (progressPercent > 0) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(Background.copy(alpha = 0.8f))
+                        .border(0.5.dp, GlassBorder, RoundedCornerShape(50))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                ) {
+                    Text("${progressPercent}%", style = MaterialTheme.typography.labelSmall, color = Primary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                 }
             }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = document.title,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.SemiBold,
-                color = OnBackground,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 4.dp),
-            )
         }
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            text = document.title.removeSuffix(".pdf").removeSuffix(".txt"),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = OnBackground,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
     }
 }
 
-// ─── Library List Item ───
+// ─── Library List Item (Glassmorphism) ───
 @Composable
 private fun LibraryListItem(
     document: DocumentEntity,
@@ -341,12 +373,9 @@ private fun LibraryListItem(
     onDelete: () -> Unit,
 ) {
     val isPdf = document.title.endsWith(".pdf", ignoreCase = true)
-    val tagText = if (isPdf) "PDF" else "TXT"
     val tagColor = if (isPdf) Primary else Secondary
-    val dateFormat = SimpleDateFormat("MMM dd", Locale.getDefault())
-    val dateStr = dateFormat.format(Date(document.addedTimestamp))
+    val dateStr = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(document.addedTimestamp))
     var showMenu by remember { mutableStateOf(false) }
-
     val progressPercent = if (progress != null && progress.totalChunks > 0) {
         (progress.currentChunkIndex.toFloat() / progress.totalChunks * 100).toInt()
     } else 0
@@ -354,10 +383,11 @@ private fun LibraryListItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .padding(horizontal = 24.dp, vertical = 5.dp)
+            .clip(RoundedCornerShape(16.dp))
             .clickable { onClick() }
-            .background(SurfaceContainerLow)
+            .background(GlassSurface)
+            .border(0.5.dp, GlassBorder, RoundedCornerShape(16.dp))
             .padding(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -365,17 +395,20 @@ private fun LibraryListItem(
         Box(
             modifier = Modifier
                 .size(48.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .clip(RoundedCornerShape(12.dp))
                 .background(
-                    if (isPdf) Color(0xFF2C1810) else Color(0xFF0F1A2C)
+                    Brush.verticalGradient(
+                        if (isPdf) listOf(Primary.copy(alpha = 0.2f), Color(0xFF1A0A0E))
+                        else listOf(Secondary.copy(alpha = 0.2f), Color(0xFF0A121A))
+                    )
                 ),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = tagText,
+                text = if (isPdf) "PDF" else "TXT",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = FontWeight.Bold,
-                color = tagColor.copy(alpha = 0.7f),
+                color = tagColor.copy(alpha = 0.6f),
                 fontSize = 11.sp,
             )
         }
@@ -384,7 +417,7 @@ private fun LibraryListItem(
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = document.title,
+                text = document.title.removeSuffix(".pdf").removeSuffix(".txt"),
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = OnBackground,
@@ -393,43 +426,22 @@ private fun LibraryListItem(
             )
             Spacer(modifier = Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = dateStr,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = OnSurfaceVariant.copy(alpha = 0.6f),
-                )
+                Text(dateStr, style = MaterialTheme.typography.labelSmall, color = OnSurfaceVariant.copy(alpha = 0.5f))
                 if (progressPercent > 0) {
-                    Text(
-                        text = "  ·  ${progressPercent}%",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Primary.copy(alpha = 0.7f),
-                    )
+                    Text("  ·  ${progressPercent}%", style = MaterialTheme.typography.labelSmall, color = Primary.copy(alpha = 0.7f), fontWeight = FontWeight.SemiBold)
                 }
             }
         }
 
         Box {
             IconButton(onClick = { showMenu = true }) {
-                Icon(
-                    Icons.Default.MoreVert,
-                    "Options",
-                    tint = OnSurfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.size(20.dp),
-                )
+                Icon(Icons.Default.MoreVert, "Options", tint = OnSurfaceVariant.copy(alpha = 0.35f), modifier = Modifier.size(18.dp))
             }
-            DropdownMenu(
-                expanded = showMenu,
-                onDismissRequest = { showMenu = false },
-            ) {
+            DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                 DropdownMenuItem(
                     text = { Text("Delete", color = Error) },
-                    onClick = {
-                        showMenu = false
-                        onDelete()
-                    },
-                    leadingIcon = {
-                        Icon(Icons.Default.Delete, null, tint = Error, modifier = Modifier.size(18.dp))
-                    },
+                    onClick = { showMenu = false; onDelete() },
+                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = Error, modifier = Modifier.size(18.dp)) },
                 )
             }
         }

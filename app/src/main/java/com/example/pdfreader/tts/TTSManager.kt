@@ -10,30 +10,29 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
 
 /**
- * Manages Android TextToSpeech engine with chunk-based playback.
+ * TTS engine with flicker-free playback and instant speed/pitch.
  *
- * Key fix: [_isPlaying] no longer flickers false between chunks.
- * We track an [_isAutoAdvancing] flag so the UI stays stable during
- * the brief gap between one utterance ending and the next starting.
+ * Speed/pitch changes take effect IMMEDIATELY — if currently speaking,
+ * we stop and re-speak the current chunk with the new rate/pitch so
+ * the user hears the change in real time, not on the next chunk.
  */
 class TTSManager(context: Context) : TextToSpeech.OnInitListener {
 
     private var tts: TextToSpeech? = null
 
-    // Engine readiness
     private val _initState = MutableStateFlow(InitState.LOADING)
     val initState: StateFlow<InitState> = _initState.asStateFlow()
 
-    // Playback state — stable, does not flicker between chunks
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
 
-    // Current chunk index
     private val _currentSentenceIndex = MutableStateFlow(0)
     val currentSentenceIndex: StateFlow<Int> = _currentSentenceIndex.asStateFlow()
 
     private var textChunks: List<String> = emptyList()
     private var isAutoAdvancing = false
+    private var currentSpeed = 1.0f
+    private var currentPitch = 1.0f
 
     init {
         tts = TextToSpeech(context, this)
@@ -42,15 +41,12 @@ class TTSManager(context: Context) : TextToSpeech.OnInitListener {
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
             val result = tts?.setLanguage(Locale.US)
-            _initState.value = if (result == TextToSpeech.LANG_MISSING_DATA ||
+            if (result == TextToSpeech.LANG_MISSING_DATA ||
                 result == TextToSpeech.LANG_NOT_SUPPORTED
             ) {
-                // Fallback to default locale
                 tts?.setLanguage(Locale.getDefault())
-                InitState.READY
-            } else {
-                InitState.READY
             }
+            _initState.value = InitState.READY
 
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
@@ -64,11 +60,9 @@ class TTSManager(context: Context) : TextToSpeech.OnInitListener {
                 override fun onDone(utteranceId: String?) {
                     val index = utteranceId?.toIntOrNull() ?: return
                     if (index < textChunks.size - 1) {
-                        // Auto-advance: keep isPlaying = true to prevent UI flicker
                         isAutoAdvancing = true
                         playChunk(index + 1)
                     } else {
-                        // Reached end of document
                         _isPlaying.value = false
                         isAutoAdvancing = false
                     }
@@ -110,12 +104,30 @@ class TTSManager(context: Context) : TextToSpeech.OnInitListener {
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, params, index.toString())
     }
 
+    /**
+     * INSTANT speed change — applies immediately to current speech.
+     * If currently speaking, stops and re-speaks at new rate.
+     */
     fun setSpeed(speed: Float) {
-        tts?.setSpeechRate(speed.coerceIn(0.25f, 4.0f))
+        val clamped = speed.coerceIn(0.25f, 4.0f)
+        currentSpeed = clamped
+        tts?.setSpeechRate(clamped)
+        // Instant: re-speak current chunk if playing
+        if (_isPlaying.value) {
+            playChunk(_currentSentenceIndex.value)
+        }
     }
 
+    /**
+     * INSTANT pitch change — applies immediately.
+     */
     fun setPitch(pitch: Float) {
-        tts?.setPitch(pitch.coerceIn(0.25f, 4.0f))
+        val clamped = pitch.coerceIn(0.25f, 4.0f)
+        currentPitch = clamped
+        tts?.setPitch(clamped)
+        if (_isPlaying.value) {
+            playChunk(_currentSentenceIndex.value)
+        }
     }
 
     fun seekTo(index: Int) {
