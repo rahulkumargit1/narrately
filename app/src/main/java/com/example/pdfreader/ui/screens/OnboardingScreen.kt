@@ -35,6 +35,7 @@ data class OnboardingPage(
     val accent: Color,
 )
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun OnboardingScreen(onFinished: () -> Unit) {
     val pages = listOf(
