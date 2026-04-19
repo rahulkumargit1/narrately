@@ -32,6 +32,11 @@
 -keep class kotlin.Metadata { *; }
 -dontwarn kotlin.**
 
+# Google Tink / EncryptedSharedPreferences (missing errorprone annotations)
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn com.google.crypto.tink.**
+
 # R8 full mode
 -allowaccessmodification
 -repackageclasses
