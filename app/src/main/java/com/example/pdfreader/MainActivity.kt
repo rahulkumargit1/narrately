@@ -28,10 +28,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             LumenTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background,
-                ) {
+                Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     NarratelyApp()
                 }
             }
@@ -59,65 +56,71 @@ fun NarratelyApp() {
     val estimatedMinutes by viewModel.estimatedMinutes.collectAsState()
     val progressPercent by viewModel.progressPercent.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
+    val fontSize by viewModel.fontSize.collectAsState()
+    val sleepTimerRemaining by viewModel.sleepTimerRemaining.collectAsState()
+    val isSleepTimerActive by viewModel.isSleepTimerActive.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
+    val searchResults by viewModel.searchResults.collectAsState()
+    val totalListeningHours by viewModel.totalListeningHours.collectAsState()
+    val totalChunksCompleted by viewModel.totalChunksCompleted.collectAsState()
 
     AnimatedContent(
         targetState = currentScreen,
         transitionSpec = {
             if (targetState.ordinal > initialState.ordinal) {
-                slideInVertically { it / 4 } + fadeIn(tween(350)) togetherWith
-                    slideOutVertically { -it / 8 } + fadeOut(tween(200))
+                slideInVertically { it / 4 } + fadeIn(tween(350)) togetherWith slideOutVertically { -it / 8 } + fadeOut(tween(200))
             } else {
-                slideInVertically { -it / 8 } + fadeIn(tween(350)) togetherWith
-                    slideOutVertically { it / 4 } + fadeOut(tween(200))
+                slideInVertically { -it / 8 } + fadeIn(tween(350)) togetherWith slideOutVertically { it / 4 } + fadeOut(tween(200))
             }
-        },
-        label = "screenTransition",
+        }, label = "nav",
     ) { screen ->
         when (screen) {
-            Screen.SPLASH -> {
-                SplashScreen(onSplashFinished = { currentScreen = Screen.LIBRARY })
-            }
-            Screen.LIBRARY -> {
-                LibraryScreen(
-                    documents = documents,
-                    progressMap = progressMap,
-                    isLoading = isLoading,
-                    errorMessage = errorMessage,
-                    onImportDocument = { uri -> viewModel.importDocument(uri) },
-                    onDocumentClick = { doc -> viewModel.openDocument(doc); currentScreen = Screen.PLAYER },
-                    onDeleteDocument = { doc -> viewModel.deleteDocument(doc) },
-                    onClearError = { viewModel.clearError() },
-                )
-            }
-            Screen.PLAYER -> {
-                PlayerScreen(
-                    documentTitle = currentDocument?.title ?: "Document",
-                    textChunks = textChunks,
-                    currentChunkIndex = currentChunkIndex,
-                    isPlaying = isPlaying,
-                    isLoading = isLoading,
-                    playbackSpeed = playbackSpeed,
-                    pitch = pitch,
-                    totalWords = totalWords,
-                    estimatedMinutes = estimatedMinutes,
-                    progressPercent = progressPercent,
-                    bookmarks = bookmarks,
-                    onPlayPause = { viewModel.playPause() },
-                    onSeekForward = { viewModel.seekForward() },
-                    onSeekBackward = { viewModel.seekBackward() },
-                    onSpeedChange = { viewModel.setSpeed(it) },
-                    onPitchChange = { viewModel.setPitch(it) },
-                    onSeekToChunk = { viewModel.seekToChunk(it) },
-                    onAddBookmark = { viewModel.addBookmark() },
-                    onDeleteBookmark = { viewModel.deleteBookmark(it) },
-                    onJumpToBookmark = { viewModel.jumpToBookmark(it) },
-                    onBack = {
-                        viewModel.saveCurrentProgress()
-                        viewModel.stopPlayback()
-                        currentScreen = Screen.LIBRARY
-                    },
-                )
-            }
+            Screen.SPLASH -> SplashScreen(onSplashFinished = { currentScreen = Screen.LIBRARY })
+            Screen.LIBRARY -> LibraryScreen(
+                documents = documents,
+                progressMap = progressMap,
+                isLoading = isLoading,
+                errorMessage = errorMessage,
+                totalListeningHours = totalListeningHours,
+                totalChunksCompleted = totalChunksCompleted,
+                onImportDocument = { viewModel.importDocument(it) },
+                onDocumentClick = { viewModel.openDocument(it); currentScreen = Screen.PLAYER },
+                onDeleteDocument = { viewModel.deleteDocument(it) },
+                onClearError = { viewModel.clearError() },
+            )
+            Screen.PLAYER -> PlayerScreen(
+                documentTitle = currentDocument?.title ?: "Document",
+                textChunks = textChunks,
+                currentChunkIndex = currentChunkIndex,
+                isPlaying = isPlaying,
+                isLoading = isLoading,
+                playbackSpeed = playbackSpeed,
+                pitch = pitch,
+                totalWords = totalWords,
+                estimatedMinutes = estimatedMinutes,
+                progressPercent = progressPercent,
+                bookmarks = bookmarks,
+                fontSize = fontSize,
+                sleepTimerRemaining = sleepTimerRemaining,
+                isSleepTimerActive = isSleepTimerActive,
+                searchQuery = searchQuery,
+                searchResults = searchResults,
+                onPlayPause = { viewModel.playPause() },
+                onSeekForward = { viewModel.seekForward() },
+                onSeekBackward = { viewModel.seekBackward() },
+                onSpeedChange = { viewModel.setSpeed(it) },
+                onPitchChange = { viewModel.setPitch(it) },
+                onSeekToChunk = { viewModel.seekToChunk(it) },
+                onAddBookmark = { viewModel.addBookmark() },
+                onDeleteBookmark = { viewModel.deleteBookmark(it) },
+                onJumpToBookmark = { viewModel.jumpToBookmark(it) },
+                onSetSleepTimer = { viewModel.setSleepTimer(it) },
+                onCancelSleepTimer = { viewModel.cancelSleepTimer() },
+                onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                onClearSearch = { viewModel.clearSearch() },
+                onFontSizeChange = { viewModel.setFontSize(it) },
+                onBack = { viewModel.saveCurrentProgress(); viewModel.stopPlayback(); currentScreen = Screen.LIBRARY },
+            )
         }
     }
 }

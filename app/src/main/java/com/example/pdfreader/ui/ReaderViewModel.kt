@@ -10,9 +10,12 @@ import com.example.pdfreader.parser.ParseResult
 import com.example.pdfreader.tts.TTSManager
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 
 @HiltViewModel
@@ -74,8 +77,38 @@ class ReaderViewModel @Inject constructor(
     val bookmarks: StateFlow<List<BookmarkEntity>> = _bookmarks.asStateFlow()
     private var bookmarkJob: Job? = null
 
-    // ─── In-memory progress cache (fixes resume race condition) ───
+    // ─── Sleep Timer ───
+    private val _sleepTimerRemaining = MutableStateFlow<Long>(0L) // seconds remaining
+    val sleepTimerRemaining: StateFlow<Long> = _sleepTimerRemaining.asStateFlow()
+    val isSleepTimerActive: StateFlow<Boolean> = _sleepTimerRemaining.map { it > 0 }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    private var sleepTimerJob: Job? = null
+
+    // ─── Search ───
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
+
+    val searchResults: StateFlow<List<Int>> = combine(_searchQuery, _textChunks) { query, chunks ->
+        if (query.length < 2) emptyList()
+        else chunks.mapIndexedNotNull { index, chunk ->
+            if (chunk.contains(query, ignoreCase = true)) index else null
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    // ─── Font Size ───
+    private val _fontSize = MutableStateFlow(15f) // sp
+    val fontSize: StateFlow<Float> = _fontSize.asStateFlow()
+
+    // ─── Listening Stats ───
+    private val _totalListeningHours = MutableStateFlow(0f)
+    val totalListeningHours: StateFlow<Float> = _totalListeningHours.asStateFlow()
+
+    private val _totalChunksCompleted = MutableStateFlow(0L)
+    val totalChunksCompleted: StateFlow<Long> = _totalChunksCompleted.asStateFlow()
+
+    // ─── Progress cache ───
     private val progressCache = mutableMapOf<Int, Int>()
+    private var listeningStartTime: Long = 0L
 
     init {
         viewModelScope.launch {
@@ -94,20 +127,70 @@ class ReaderViewModel @Inject constructor(
                 persistProgress(doc.id, idx)
             }
         }
+        // Track chunks completed
+        viewModelScope.launch {
+            currentChunkIndex.collect {
+                incrementChunksCompleted()
+            }
+        }
+        // Track listening time
+        viewModelScope.launch {
+            isPlaying.collect { playing ->
+                if (playing) {
+                    listeningStartTime = System.currentTimeMillis()
+                } else if (listeningStartTime > 0) {
+                    val elapsed = (System.currentTimeMillis() - listeningStartTime) / 1000
+                    if (elapsed > 0) addListeningTime(elapsed)
+                    listeningStartTime = 0L
+                }
+            }
+        }
+        // Load total stats
+        viewModelScope.launch {
+            val totalSec = readerDao.getTotalListeningSeconds() ?: 0L
+            _totalListeningHours.value = totalSec / 3600f
+            _totalChunksCompleted.value = readerDao.getTotalChunksCompleted() ?: 0L
+        }
     }
 
     private fun persistProgress(docId: Int, chunkIndex: Int) {
         val chunks = _textChunks.value
         if (chunks.isEmpty()) return
         viewModelScope.launch {
-            readerDao.saveProgress(ProgressEntity(
-                documentId = docId,
-                currentChunkIndex = chunkIndex,
-                totalChunks = chunks.size,
-            ))
+            readerDao.saveProgress(ProgressEntity(documentId = docId, currentChunkIndex = chunkIndex, totalChunks = chunks.size))
         }
     }
 
+    // ─── Listening Stats Tracking ───
+    private fun todayStr(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+    private fun addListeningTime(seconds: Long) {
+        viewModelScope.launch {
+            val date = todayStr()
+            val existing = readerDao.getStatsForDate(date)
+            if (existing != null) {
+                readerDao.saveStats(existing.copy(totalSecondsListened = existing.totalSecondsListened + seconds))
+            } else {
+                readerDao.saveStats(ListeningStatsEntity(date = date, totalSecondsListened = seconds))
+            }
+            _totalListeningHours.value = (readerDao.getTotalListeningSeconds() ?: 0L) / 3600f
+        }
+    }
+
+    private fun incrementChunksCompleted() {
+        viewModelScope.launch {
+            val date = todayStr()
+            val existing = readerDao.getStatsForDate(date)
+            if (existing != null) {
+                readerDao.saveStats(existing.copy(chunksCompleted = existing.chunksCompleted + 1))
+            } else {
+                readerDao.saveStats(ListeningStatsEntity(date = date, chunksCompleted = 1))
+            }
+            _totalChunksCompleted.value = readerDao.getTotalChunksCompleted() ?: 0L
+        }
+    }
+
+    // ─── Import ───
     fun importDocument(uri: Uri) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -123,21 +206,25 @@ class ReaderViewModel @Inject constructor(
                     val mimeType = getApplication<Application>().contentResolver.getType(uri) ?: "unknown"
                     val newDoc = DocumentEntity(title = result.title, fileUri = uri.toString(), mimeType = mimeType)
                     val id = readerDao.insertDocument(newDoc).toInt()
-
-                    // Save initial progress
                     readerDao.saveProgress(ProgressEntity(documentId = id, currentChunkIndex = 0, totalChunks = result.chunks.size))
                     progressCache[id] = 0
-
-                    // Cache parsed chunks (no re-parsing on next open!)
                     cacheChunks(id, result.chunks)
 
-                    // Extract PDF thumbnail in background
                     if (mimeType == "application/pdf" || result.title.endsWith(".pdf", ignoreCase = true)) {
                         viewModelScope.launch {
                             val thumbPath = documentParser.extractPdfThumbnail(uri, id)
-                            if (thumbPath != null) {
-                                readerDao.updateThumbnail(id, thumbPath)
-                            }
+                            if (thumbPath != null) readerDao.updateThumbnail(id, thumbPath)
+                        }
+                    }
+
+                    // Track stats
+                    viewModelScope.launch {
+                        val date = todayStr()
+                        val existing = readerDao.getStatsForDate(date)
+                        if (existing != null) {
+                            readerDao.saveStats(existing.copy(documentsOpened = existing.documentsOpened + 1))
+                        } else {
+                            readerDao.saveStats(ListeningStatsEntity(date = date, documentsOpened = 1))
                         }
                     }
                 }
@@ -155,24 +242,20 @@ class ReaderViewModel @Inject constructor(
             _errorMessage.value = null
             _currentDocument.value = document
 
-            // Try to load from cache FIRST (instant — no re-parsing)
             val cached = readerDao.getCachedChunks(document.id)
             val chunks: List<String>
 
             if (cached != null) {
-                // FAST PATH: load from cache
                 chunks = deserializeChunks(cached.chunksJson)
             } else {
-                // SLOW PATH: parse from file (first time only)
                 val uri = Uri.parse(document.fileUri)
                 when (val result = documentParser.parseDocument(uri)) {
                     is ParseResult.Success -> {
                         chunks = result.chunks
-                        // Cache for next time
                         cacheChunks(document.id, chunks)
                     }
                     is ParseResult.Error -> {
-                        _errorMessage.value = result.exception.message ?: "Failed to open document"
+                        _errorMessage.value = result.exception.message ?: "Failed to open"
                         _textChunks.value = emptyList()
                         _isLoading.value = false
                         return@launch
@@ -181,35 +264,24 @@ class ReaderViewModel @Inject constructor(
             }
 
             _textChunks.value = chunks
-
-            // Resume from last position
             val startIndex = progressCache[document.id]
                 ?: readerDao.getProgressForDocument(document.id)?.currentChunkIndex
                 ?: 0
-
             ttsManager.loadText(chunks, startIndex)
             progressCache[document.id] = startIndex
 
-            // Load bookmarks
             bookmarkJob?.cancel()
             bookmarkJob = viewModelScope.launch {
-                readerDao.getBookmarksForDocument(document.id).collect {
-                    _bookmarks.value = it
-                }
+                readerDao.getBookmarksForDocument(document.id).collect { _bookmarks.value = it }
             }
-
             _isLoading.value = false
         }
     }
 
-    // ─── Chunk caching (JSON serialization) ───
     private suspend fun cacheChunks(docId: Int, chunks: List<String>) {
         val jsonArray = JSONArray()
         for (chunk in chunks) jsonArray.put(chunk)
-        readerDao.saveCachedChunks(CachedChunksEntity(
-            documentId = docId,
-            chunksJson = jsonArray.toString(),
-        ))
+        readerDao.saveCachedChunks(CachedChunksEntity(documentId = docId, chunksJson = jsonArray.toString()))
     }
 
     private fun deserializeChunks(json: String): List<String> {
@@ -217,53 +289,57 @@ class ReaderViewModel @Inject constructor(
         return (0 until arr.length()).map { arr.getString(it) }
     }
 
-    // ─── Playback controls ───
-    fun playPause() {
-        if (isPlaying.value) ttsManager.pause() else ttsManager.play()
-    }
-
-    fun seekForward() {
-        val next = (currentChunkIndex.value + 1).coerceAtMost(textChunks.value.size - 1)
-        ttsManager.seekTo(next)
-    }
-
-    fun seekBackward() {
-        val prev = (currentChunkIndex.value - 1).coerceAtLeast(0)
-        ttsManager.seekTo(prev)
-    }
-
+    // ─── Playback ───
+    fun playPause() { if (isPlaying.value) ttsManager.pause() else ttsManager.play() }
+    fun seekForward() { ttsManager.seekTo((currentChunkIndex.value + 1).coerceAtMost(textChunks.value.size - 1)) }
+    fun seekBackward() { ttsManager.seekTo((currentChunkIndex.value - 1).coerceAtLeast(0)) }
     fun seekToChunk(index: Int) { ttsManager.seekTo(index) }
 
-    fun setSpeed(speed: Float) {
-        _playbackSpeed.value = speed
-        ttsManager.setSpeed(speed)
+    fun setSpeed(speed: Float) { _playbackSpeed.value = speed; ttsManager.setSpeed(speed) }
+    fun setPitch(p: Float) { _pitch.value = p; ttsManager.setPitch(p) }
+
+    // ─── Sleep Timer ───
+    fun setSleepTimer(minutes: Int) {
+        sleepTimerJob?.cancel()
+        if (minutes <= 0) {
+            _sleepTimerRemaining.value = 0L
+            return
+        }
+        _sleepTimerRemaining.value = minutes * 60L
+        sleepTimerJob = viewModelScope.launch {
+            while (_sleepTimerRemaining.value > 0) {
+                delay(1000)
+                _sleepTimerRemaining.value -= 1
+            }
+            // Timer expired — stop playback
+            ttsManager.pause()
+            _sleepTimerRemaining.value = 0L
+        }
     }
 
-    fun setPitch(p: Float) {
-        _pitch.value = p
-        ttsManager.setPitch(p)
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        _sleepTimerRemaining.value = 0L
     }
+
+    // ─── Search ───
+    fun setSearchQuery(query: String) { _searchQuery.value = query }
+    fun clearSearch() { _searchQuery.value = "" }
+
+    // ─── Font Size ───
+    fun setFontSize(size: Float) { _fontSize.value = size.coerceIn(12f, 24f) }
 
     // ─── Bookmarks ───
     fun addBookmark(label: String = "") {
         val doc = _currentDocument.value ?: return
         val idx = currentChunkIndex.value
         viewModelScope.launch {
-            readerDao.insertBookmark(BookmarkEntity(
-                documentId = doc.id,
-                chunkIndex = idx,
-                label = label.ifBlank { "Chunk ${idx + 1}" },
-            ))
+            readerDao.insertBookmark(BookmarkEntity(documentId = doc.id, chunkIndex = idx, label = label.ifBlank { "Chunk ${idx + 1}" }))
         }
     }
 
-    fun deleteBookmark(bookmark: BookmarkEntity) {
-        viewModelScope.launch { readerDao.deleteBookmark(bookmark.id) }
-    }
-
-    fun jumpToBookmark(bookmark: BookmarkEntity) {
-        ttsManager.seekTo(bookmark.chunkIndex)
-    }
+    fun deleteBookmark(bookmark: BookmarkEntity) { viewModelScope.launch { readerDao.deleteBookmark(bookmark.id) } }
+    fun jumpToBookmark(bookmark: BookmarkEntity) { ttsManager.seekTo(bookmark.chunkIndex) }
 
     // ─── Document management ───
     fun deleteDocument(document: DocumentEntity) {
@@ -273,7 +349,6 @@ class ReaderViewModel @Inject constructor(
             readerDao.deleteBookmarksForDocument(document.id)
             readerDao.deleteCachedChunks(document.id)
             progressCache.remove(document.id)
-            // Clean up thumbnail
             document.thumbnailPath?.let { java.io.File(it).delete() }
         }
     }
@@ -290,6 +365,11 @@ class ReaderViewModel @Inject constructor(
 
     override fun onCleared() {
         saveCurrentProgress()
+        // Flush listening time
+        if (listeningStartTime > 0) {
+            val elapsed = (System.currentTimeMillis() - listeningStartTime) / 1000
+            if (elapsed > 0) addListeningTime(elapsed)
+        }
         ttsManager.shutdown()
         super.onCleared()
     }
