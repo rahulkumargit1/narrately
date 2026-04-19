@@ -4,6 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.pdfreader.data.BookmarkEntity
 import com.example.pdfreader.data.DocumentEntity
 import com.example.pdfreader.data.ProgressEntity
 import com.example.pdfreader.data.ReaderDao
@@ -11,6 +12,7 @@ import com.example.pdfreader.parser.DocumentParser
 import com.example.pdfreader.parser.ParseResult
 import com.example.pdfreader.tts.TTSManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -61,7 +63,6 @@ class ReaderViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
 
     val estimatedMinutes: StateFlow<Int> = totalWordCount.map { words ->
-        // Average reading speed ~200 WPM for TTS at 1x
         (words / 200.0).toInt().coerceAtLeast(1)
     }.stateIn(viewModelScope, SharingStarted.Lazily, 1)
 
@@ -70,7 +71,18 @@ class ReaderViewModel @Inject constructor(
         else ((idx.toFloat() / chunks.size) * 100).toInt().coerceIn(0, 100)
     }.stateIn(viewModelScope, SharingStarted.Lazily, 0)
 
+    // ─── Bookmarks ───
+    private val _bookmarks = MutableStateFlow<List<BookmarkEntity>>(emptyList())
+    val bookmarks: StateFlow<List<BookmarkEntity>> = _bookmarks.asStateFlow()
+    private var bookmarkJob: Job? = null
+
+    // ─── In-memory progress cache ───
+    // This is the KEY FIX: we track progress in memory so going back
+    // and re-opening doesn't have a race condition with async DB writes.
+    private val progressCache = mutableMapOf<Int, Int>()
+
     init {
+        // Keep progress map in sync
         viewModelScope.launch {
             libraryDocuments.collect { docs ->
                 val map = mutableMapOf<Int, ProgressEntity>()
@@ -80,9 +92,28 @@ class ReaderViewModel @Inject constructor(
                 _progressMap.value = map
             }
         }
-        // Auto-save on chunk change
+        // Auto-save progress on every chunk change
         viewModelScope.launch {
-            currentChunkIndex.collect { saveCurrentProgress() }
+            currentChunkIndex.collect { idx ->
+                val doc = _currentDocument.value ?: return@collect
+                // Update in-memory cache IMMEDIATELY (no async delay)
+                progressCache[doc.id] = idx
+                // Also persist to DB (async, but cache is already updated)
+                persistProgress(doc.id, idx)
+            }
+        }
+    }
+
+    /** Persist progress to Room (async but non-critical — cache is source of truth) */
+    private fun persistProgress(docId: Int, chunkIndex: Int) {
+        val chunks = _textChunks.value
+        if (chunks.isEmpty()) return
+        viewModelScope.launch {
+            readerDao.saveProgress(ProgressEntity(
+                documentId = docId,
+                currentChunkIndex = chunkIndex,
+                totalChunks = chunks.size,
+            ))
         }
     }
 
@@ -102,6 +133,7 @@ class ReaderViewModel @Inject constructor(
                     val newDoc = DocumentEntity(title = result.title, fileUri = uri.toString(), mimeType = mimeType)
                     val id = readerDao.insertDocument(newDoc).toInt()
                     readerDao.saveProgress(ProgressEntity(documentId = id, currentChunkIndex = 0, totalChunks = result.chunks.size))
+                    progressCache[id] = 0
                 }
                 is ParseResult.Error -> {
                     _errorMessage.value = result.exception.message ?: "Failed to parse document"
@@ -121,9 +153,23 @@ class ReaderViewModel @Inject constructor(
             when (val result = documentParser.parseDocument(uri)) {
                 is ParseResult.Success -> {
                     _textChunks.value = result.chunks
-                    val progress = readerDao.getProgressForDocument(document.id)
-                    val startIndex = progress?.currentChunkIndex ?: 0
+
+                    // Resume position: check in-memory cache FIRST (instant, no race),
+                    // fall back to DB, then default to 0
+                    val startIndex = progressCache[document.id]
+                        ?: readerDao.getProgressForDocument(document.id)?.currentChunkIndex
+                        ?: 0
+
                     ttsManager.loadText(result.chunks, startIndex)
+                    progressCache[document.id] = startIndex
+
+                    // Load bookmarks for this document
+                    bookmarkJob?.cancel()
+                    bookmarkJob = viewModelScope.launch {
+                        readerDao.getBookmarksForDocument(document.id).collect {
+                            _bookmarks.value = it
+                        }
+                    }
                 }
                 is ParseResult.Error -> {
                     _errorMessage.value = result.exception.message ?: "Failed to open document"
@@ -153,36 +199,55 @@ class ReaderViewModel @Inject constructor(
 
     fun setSpeed(speed: Float) {
         _playbackSpeed.value = speed
-        ttsManager.setSpeed(speed)  // Instant — re-speaks if playing
+        ttsManager.setSpeed(speed)
     }
 
     fun setPitch(p: Float) {
         _pitch.value = p
-        ttsManager.setPitch(p)  // Instant — re-speaks if playing
+        ttsManager.setPitch(p)
     }
 
+    // ─── Bookmarks ───
+    fun addBookmark(label: String = "") {
+        val doc = _currentDocument.value ?: return
+        val idx = currentChunkIndex.value
+        viewModelScope.launch {
+            readerDao.insertBookmark(BookmarkEntity(
+                documentId = doc.id,
+                chunkIndex = idx,
+                label = label.ifBlank { "Chunk ${idx + 1}" },
+            ))
+        }
+    }
+
+    fun deleteBookmark(bookmark: BookmarkEntity) {
+        viewModelScope.launch { readerDao.deleteBookmark(bookmark.id) }
+    }
+
+    fun jumpToBookmark(bookmark: BookmarkEntity) {
+        ttsManager.seekTo(bookmark.chunkIndex)
+    }
+
+    // ─── Document management ───
     fun deleteDocument(document: DocumentEntity) {
         viewModelScope.launch {
             readerDao.deleteDocument(document.id)
             readerDao.deleteProgress(document.id)
+            readerDao.deleteBookmarksForDocument(document.id)
+            progressCache.remove(document.id)
         }
     }
 
     fun clearError() { _errorMessage.value = null }
+
     fun stopPlayback() { ttsManager.pause() }
 
+    /** Save current progress synchronously to cache + async to DB */
     fun saveCurrentProgress() {
-        viewModelScope.launch {
-            val doc = _currentDocument.value ?: return@launch
-            val chunks = _textChunks.value
-            if (chunks.isNotEmpty()) {
-                readerDao.saveProgress(ProgressEntity(
-                    documentId = doc.id,
-                    currentChunkIndex = currentChunkIndex.value,
-                    totalChunks = chunks.size,
-                ))
-            }
-        }
+        val doc = _currentDocument.value ?: return
+        val idx = currentChunkIndex.value
+        progressCache[doc.id] = idx
+        persistProgress(doc.id, idx)
     }
 
     override fun onCleared() {

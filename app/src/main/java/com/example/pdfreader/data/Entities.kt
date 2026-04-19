@@ -19,3 +19,12 @@ data class ProgressEntity(
     val totalChunks: Int,
     val lastReadTimestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "bookmarks")
+data class BookmarkEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val documentId: Int,
+    val chunkIndex: Int,
+    val label: String = "",
+    val createdTimestamp: Long = System.currentTimeMillis()
+)

@@ -22,7 +22,9 @@ object DatabaseModule {
             context,
             ReaderDatabase::class.java,
             "reader_database"
-        ).build()
+        )
+            .fallbackToDestructiveMigration()
+            .build()
     }
 
     @Provides

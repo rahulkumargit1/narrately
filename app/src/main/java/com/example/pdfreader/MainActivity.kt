@@ -58,6 +58,7 @@ fun NarratelyApp() {
     val totalWords by viewModel.totalWordCount.collectAsState()
     val estimatedMinutes by viewModel.estimatedMinutes.collectAsState()
     val progressPercent by viewModel.progressPercent.collectAsState()
+    val bookmarks by viewModel.bookmarks.collectAsState()
 
     AnimatedContent(
         targetState = currentScreen,
@@ -100,12 +101,16 @@ fun NarratelyApp() {
                     totalWords = totalWords,
                     estimatedMinutes = estimatedMinutes,
                     progressPercent = progressPercent,
+                    bookmarks = bookmarks,
                     onPlayPause = { viewModel.playPause() },
                     onSeekForward = { viewModel.seekForward() },
                     onSeekBackward = { viewModel.seekBackward() },
                     onSpeedChange = { viewModel.setSpeed(it) },
                     onPitchChange = { viewModel.setPitch(it) },
                     onSeekToChunk = { viewModel.seekToChunk(it) },
+                    onAddBookmark = { viewModel.addBookmark() },
+                    onDeleteBookmark = { viewModel.deleteBookmark(it) },
+                    onJumpToBookmark = { viewModel.jumpToBookmark(it) },
                     onBack = {
                         viewModel.saveCurrentProgress()
                         viewModel.stopPlayback()

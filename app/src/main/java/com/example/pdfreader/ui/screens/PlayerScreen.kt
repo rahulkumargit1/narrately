@@ -13,6 +13,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material.icons.filled.BookmarkRemove
+import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -30,10 +34,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.pdfreader.data.BookmarkEntity
 import com.example.pdfreader.ui.theme.*
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,24 +53,28 @@ fun PlayerScreen(
     totalWords: Int,
     estimatedMinutes: Int,
     progressPercent: Int,
+    bookmarks: List<BookmarkEntity>,
     onPlayPause: () -> Unit,
     onSeekForward: () -> Unit,
     onSeekBackward: () -> Unit,
     onSpeedChange: (Float) -> Unit,
     onPitchChange: (Float) -> Unit,
     onSeekToChunk: (Int) -> Unit,
+    onAddBookmark: () -> Unit,
+    onDeleteBookmark: (BookmarkEntity) -> Unit,
+    onJumpToBookmark: (BookmarkEntity) -> Unit,
     onBack: () -> Unit,
 ) {
     val listState = rememberLazyListState()
 
-    // Auto-scroll
+    // Auto-scroll to active chunk
     LaunchedEffect(currentChunkIndex) {
         if (textChunks.isNotEmpty() && currentChunkIndex in textChunks.indices) {
             listState.animateScrollToItem(currentChunkIndex, scrollOffset = -200)
         }
     }
 
-    // Ambient background glow animation
+    // Ambient glow
     val infiniteTransition = rememberInfiniteTransition(label = "playerAmbient")
     val glowX by infiniteTransition.animateFloat(
         initialValue = 0.3f, targetValue = 0.7f,
@@ -79,9 +87,10 @@ fun PlayerScreen(
         label = "glowY",
     )
 
-    // Speed/Pitch bottom sheet state
+    // Sheet states
     var showSpeedSheet by remember { mutableStateOf(false) }
     var showPitchSheet by remember { mutableStateOf(false) }
+    var showBookmarksSheet by remember { mutableStateOf(false) }
 
     if (showSpeedSheet) {
         SpeedPitchSheet(
@@ -103,13 +112,22 @@ fun PlayerScreen(
             onDismiss = { showPitchSheet = false },
         )
     }
+    if (showBookmarksSheet) {
+        BookmarksSheet(
+            bookmarks = bookmarks,
+            textChunks = textChunks,
+            currentChunkIndex = currentChunkIndex,
+            onJump = { onJumpToBookmark(it); showBookmarksSheet = false },
+            onDelete = onDeleteBookmark,
+            onDismiss = { showBookmarksSheet = false },
+        )
+    }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(Background)
             .drawBehind {
-                // Floating ambient glow
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(PrimaryGlow, Color.Transparent),
@@ -145,7 +163,10 @@ fun PlayerScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Spacer(modifier = Modifier.size(48.dp))
+                // Bookmark add button
+                IconButton(onClick = onAddBookmark) {
+                    Icon(Icons.Default.BookmarkAdd, "Add Bookmark", tint = Primary, modifier = Modifier.size(22.dp))
+                }
             }
 
             // ─── Stats Glass Bar ───
@@ -167,7 +188,7 @@ fun PlayerScreen(
                 }
             }
 
-            // ─── Content Area ───
+            // ─── Content ───
             if (isLoading) {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = Primary, strokeWidth = 2.dp, modifier = Modifier.size(32.dp))
@@ -175,9 +196,7 @@ fun PlayerScreen(
             } else if (textChunks.isEmpty()) {
                 Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("📄", fontSize = 48.sp)
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("No text content found", style = MaterialTheme.typography.bodyLarge, color = OnSurfaceVariant)
+                        Text("No content", style = MaterialTheme.typography.bodyLarge, color = OnSurfaceVariant)
                     }
                 }
             } else {
@@ -190,6 +209,7 @@ fun PlayerScreen(
                 ) {
                     itemsIndexed(textChunks) { index, chunk ->
                         val isActive = index == currentChunkIndex
+                        val isBookmarked = bookmarks.any { it.chunkIndex == index }
                         val textColor by animateColorAsState(
                             targetValue = when {
                                 isActive -> OnBackground
@@ -200,25 +220,42 @@ fun PlayerScreen(
                             label = "chunkColor",
                         )
 
-                        Text(
-                            text = chunk,
-                            style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, fontSize = 15.sp),
-                            color = textColor,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .then(
-                                    if (isActive) Modifier
-                                        .clip(RoundedCornerShape(14.dp))
-                                        .background(GlassSurface)
-                                        .border(0.5.dp, GlassBorder, RoundedCornerShape(14.dp))
-                                        .padding(16.dp)
-                                    else Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.Top,
+                        ) {
+                            // Bookmark indicator
+                            if (isBookmarked) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = if (isActive) 18.dp else 6.dp)
+                                        .size(4.dp)
+                                        .clip(CircleShape)
+                                        .background(Primary),
                                 )
-                                .clickable(
-                                    indication = null,
-                                    interactionSource = remember { MutableInteractionSource() },
-                                ) { onSeekToChunk(index) },
-                        )
+                                Spacer(modifier = Modifier.width(4.dp))
+                            }
+
+                            Text(
+                                text = chunk,
+                                style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp, fontSize = 15.sp),
+                                color = textColor,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .then(
+                                        if (isActive) Modifier
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(GlassSurface)
+                                            .border(0.5.dp, GlassBorder, RoundedCornerShape(14.dp))
+                                            .padding(16.dp)
+                                        else Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                                    )
+                                    .clickable(
+                                        indication = null,
+                                        interactionSource = remember { MutableInteractionSource() },
+                                    ) { onSeekToChunk(index) },
+                            )
+                        }
                     }
                 }
             }
@@ -252,7 +289,6 @@ fun PlayerScreen(
                 IconButton(onClick = onSeekBackward, modifier = Modifier.size(52.dp)) {
                     Icon(Icons.Default.SkipPrevious, "Previous", tint = OnBackground, modifier = Modifier.size(34.dp))
                 }
-                // Play/Pause — large glass button
                 IconButton(
                     onClick = onPlayPause,
                     modifier = Modifier
@@ -272,59 +308,76 @@ fun PlayerScreen(
                 }
             }
 
-            // ─── Speed & Pitch — Glass Buttons ───
+            // ─── Bottom Controls: Speed / Pitch / Bookmarks ───
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 40.dp)
-                    .padding(bottom = 20.dp)
+                    .padding(horizontal = 24.dp)
+                    .padding(bottom = 16.dp)
                     .navigationBarsPadding(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Speed button
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { showSpeedSheet = true }
-                        .background(GlassSurface)
-                        .border(0.5.dp, GlassBorder, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(Icons.Outlined.Speed, null, tint = if (playbackSpeed != 1.0f) Primary else OnSurfaceVariant, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "${playbackSpeed}x",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (playbackSpeed != 1.0f) Primary else OnSurfaceVariant,
-                    )
-                }
-                // Pitch button
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(12.dp))
-                        .clickable { showPitchSheet = true }
-                        .background(GlassSurface)
-                        .border(0.5.dp, GlassBorder, RoundedCornerShape(12.dp))
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(Icons.Outlined.Tune, null, tint = if (pitch != 1.0f) Secondary else OnSurfaceVariant, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (pitch == 1.0f) "Pitch" else "Pitch $pitch",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (pitch != 1.0f) Secondary else OnSurfaceVariant,
-                    )
-                }
+                // Speed
+                GlassChip(
+                    modifier = Modifier.weight(1f),
+                    label = "${playbackSpeed}x",
+                    icon = { Icon(Icons.Outlined.Speed, null, tint = if (playbackSpeed != 1.0f) Primary else OnSurfaceVariant, modifier = Modifier.size(15.dp)) },
+                    isActive = playbackSpeed != 1.0f,
+                    activeColor = Primary,
+                    onClick = { showSpeedSheet = true },
+                )
+                // Pitch
+                GlassChip(
+                    modifier = Modifier.weight(1f),
+                    label = if (pitch == 1.0f) "Pitch" else "$pitch",
+                    icon = { Icon(Icons.Outlined.Tune, null, tint = if (pitch != 1.0f) Secondary else OnSurfaceVariant, modifier = Modifier.size(15.dp)) },
+                    isActive = pitch != 1.0f,
+                    activeColor = Secondary,
+                    onClick = { showPitchSheet = true },
+                )
+                // Bookmarks
+                GlassChip(
+                    modifier = Modifier.weight(1f),
+                    label = if (bookmarks.isEmpty()) "Marks" else "${bookmarks.size}",
+                    icon = { Icon(Icons.Default.Bookmarks, null, tint = if (bookmarks.isNotEmpty()) AccentOrange else OnSurfaceVariant, modifier = Modifier.size(15.dp)) },
+                    isActive = bookmarks.isNotEmpty(),
+                    activeColor = AccentOrange,
+                    onClick = { showBookmarksSheet = true },
+                )
             }
         }
+    }
+}
+
+// ─── Glass Chip ───
+@Composable
+private fun GlassChip(
+    modifier: Modifier = Modifier,
+    label: String,
+    icon: @Composable () -> Unit,
+    isActive: Boolean,
+    activeColor: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable { onClick() }
+            .background(if (isActive) activeColor.copy(alpha = 0.08f) else GlassSurface)
+            .border(0.5.dp, if (isActive) activeColor.copy(alpha = 0.3f) else GlassBorder, RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        icon()
+        Spacer(modifier = Modifier.width(5.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
+            color = if (isActive) activeColor else OnSurfaceVariant,
+            fontSize = 12.sp,
+        )
     }
 }
 
@@ -337,7 +390,72 @@ private fun MiniStat(value: String, label: String) {
     }
 }
 
-// ─── Speed/Pitch Selection Sheet ───
+// ─── Bookmarks Sheet ───
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BookmarksSheet(
+    bookmarks: List<BookmarkEntity>,
+    textChunks: List<String>,
+    currentChunkIndex: Int,
+    onJump: (BookmarkEntity) -> Unit,
+    onDelete: (BookmarkEntity) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceContainer,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        dragHandle = {
+            Box(
+                modifier = Modifier.padding(vertical = 12.dp).width(36.dp).height(4.dp)
+                    .clip(RoundedCornerShape(50)).background(OnSurfaceVariant.copy(alpha = 0.3f)),
+            )
+        },
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp),
+        ) {
+            Text("Bookmarks", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = OnBackground)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            if (bookmarks.isEmpty()) {
+                Text(
+                    "No bookmarks yet. Tap the bookmark icon to save your position.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = OnSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(vertical = 24.dp),
+                )
+            } else {
+                bookmarks.forEach { bm ->
+                    val preview = textChunks.getOrNull(bm.chunkIndex)?.take(80) ?: ""
+                    val isCurrent = bm.chunkIndex == currentChunkIndex
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .clickable { onJump(bm) }
+                            .background(if (isCurrent) Primary.copy(alpha = 0.1f) else GlassSurface)
+                            .border(0.5.dp, if (isCurrent) Primary.copy(alpha = 0.3f) else GlassBorder, RoundedCornerShape(12.dp))
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(bm.label, style = MaterialTheme.typography.labelLarge, color = if (isCurrent) Primary else OnBackground, fontWeight = FontWeight.SemiBold)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text("$preview…", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant.copy(alpha = 0.5f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onDelete(bm) }, modifier = Modifier.size(32.dp)) {
+                            Icon(Icons.Default.Delete, "Delete", tint = OnSurfaceVariant.copy(alpha = 0.3f), modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ─── Speed/Pitch Sheet ───
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SpeedPitchSheet(
@@ -354,66 +472,34 @@ private fun SpeedPitchSheet(
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         dragHandle = {
             Box(
-                modifier = Modifier
-                    .padding(vertical = 12.dp)
-                    .width(36.dp)
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(OnSurfaceVariant.copy(alpha = 0.3f)),
+                modifier = Modifier.padding(vertical = 12.dp).width(36.dp).height(4.dp)
+                    .clip(RoundedCornerShape(50)).background(OnSurfaceVariant.copy(alpha = 0.3f)),
             )
         },
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 40.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp),
         ) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = OnBackground,
-                modifier = Modifier.padding(bottom = 16.dp),
-            )
-            // Grid of chips
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = OnBackground, modifier = Modifier.padding(bottom = 16.dp))
             val chunked = values.chunked(4)
             for (row in chunked) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                Row(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (v in row) {
                         val isSelected = v == currentValue
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(12.dp))
-                                .clickable {
-                                    onChange(v)
-                                    // Don't dismiss — user can hear the change live
-                                }
+                                .clickable { onChange(v) }
                                 .background(if (isSelected) Primary.copy(alpha = 0.2f) else GlassSurface)
-                                .border(
-                                    width = if (isSelected) 1.5.dp else 0.5.dp,
-                                    color = if (isSelected) Primary else GlassBorder,
-                                    shape = RoundedCornerShape(12.dp),
-                                )
+                                .border(if (isSelected) 1.5.dp else 0.5.dp, if (isSelected) Primary else GlassBorder, RoundedCornerShape(12.dp))
                                 .padding(vertical = 14.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Text(
-                                text = formatLabel(v),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Primary else OnSurfaceVariant,
-                            )
+                            Text(formatLabel(v), style = MaterialTheme.typography.labelLarge, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium, color = if (isSelected) Primary else OnSurfaceVariant)
                         }
                     }
-                    // Fill remaining slots if row is incomplete
-                    repeat(4 - row.size) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
+                    repeat(4 - row.size) { Spacer(modifier = Modifier.weight(1f)) }
                 }
             }
         }
