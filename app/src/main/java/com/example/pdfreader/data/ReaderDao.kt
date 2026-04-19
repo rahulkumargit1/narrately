@@ -12,11 +12,11 @@ interface ReaderDao {
     @Query("SELECT * FROM documents ORDER BY addedTimestamp DESC")
     fun getAllDocuments(): Flow<List<DocumentEntity>>
 
-    @Query("SELECT * FROM documents WHERE id = :id")
-    suspend fun getDocumentById(id: Int): DocumentEntity?
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertDocument(document: DocumentEntity): Long
+
+    @Query("UPDATE documents SET thumbnailPath = :path WHERE id = :id")
+    suspend fun updateThumbnail(id: Int, path: String)
 
     @Query("DELETE FROM documents WHERE id = :id")
     suspend fun deleteDocument(id: Int)
@@ -43,4 +43,14 @@ interface ReaderDao {
 
     @Query("DELETE FROM bookmarks WHERE documentId = :documentId")
     suspend fun deleteBookmarksForDocument(documentId: Int)
+
+    // ─── Cached Chunks ───
+    @Query("SELECT * FROM cached_chunks WHERE documentId = :documentId")
+    suspend fun getCachedChunks(documentId: Int): CachedChunksEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveCachedChunks(cached: CachedChunksEntity)
+
+    @Query("DELETE FROM cached_chunks WHERE documentId = :documentId")
+    suspend fun deleteCachedChunks(documentId: Int)
 }

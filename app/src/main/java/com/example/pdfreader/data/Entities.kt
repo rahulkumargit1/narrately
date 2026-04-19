@@ -9,6 +9,7 @@ data class DocumentEntity(
     val title: String,
     val fileUri: String,
     val mimeType: String,
+    val thumbnailPath: String? = null,
     val addedTimestamp: Long = System.currentTimeMillis()
 )
 
@@ -27,4 +28,12 @@ data class BookmarkEntity(
     val chunkIndex: Int,
     val label: String = "",
     val createdTimestamp: Long = System.currentTimeMillis()
+)
+
+/** Cached parsed text — avoids re-parsing PDFs on every open */
+@Entity(tableName = "cached_chunks")
+data class CachedChunksEntity(
+    @PrimaryKey val documentId: Int,
+    val chunksJson: String,   // JSON array of chunk strings
+    val parsedTimestamp: Long = System.currentTimeMillis()
 )

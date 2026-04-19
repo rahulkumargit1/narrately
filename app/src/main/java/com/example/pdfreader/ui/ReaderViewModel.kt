@@ -4,10 +4,7 @@ import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.pdfreader.data.BookmarkEntity
-import com.example.pdfreader.data.DocumentEntity
-import com.example.pdfreader.data.ProgressEntity
-import com.example.pdfreader.data.ReaderDao
+import com.example.pdfreader.data.*
 import com.example.pdfreader.parser.DocumentParser
 import com.example.pdfreader.parser.ParseResult
 import com.example.pdfreader.tts.TTSManager
@@ -15,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import javax.inject.Inject
 
 @HiltViewModel
@@ -76,13 +74,10 @@ class ReaderViewModel @Inject constructor(
     val bookmarks: StateFlow<List<BookmarkEntity>> = _bookmarks.asStateFlow()
     private var bookmarkJob: Job? = null
 
-    // ─── In-memory progress cache ───
-    // This is the KEY FIX: we track progress in memory so going back
-    // and re-opening doesn't have a race condition with async DB writes.
+    // ─── In-memory progress cache (fixes resume race condition) ───
     private val progressCache = mutableMapOf<Int, Int>()
 
     init {
-        // Keep progress map in sync
         viewModelScope.launch {
             libraryDocuments.collect { docs ->
                 val map = mutableMapOf<Int, ProgressEntity>()
@@ -92,19 +87,15 @@ class ReaderViewModel @Inject constructor(
                 _progressMap.value = map
             }
         }
-        // Auto-save progress on every chunk change
         viewModelScope.launch {
             currentChunkIndex.collect { idx ->
                 val doc = _currentDocument.value ?: return@collect
-                // Update in-memory cache IMMEDIATELY (no async delay)
                 progressCache[doc.id] = idx
-                // Also persist to DB (async, but cache is already updated)
                 persistProgress(doc.id, idx)
             }
         }
     }
 
-    /** Persist progress to Room (async but non-critical — cache is source of truth) */
     private fun persistProgress(docId: Int, chunkIndex: Int) {
         val chunks = _textChunks.value
         if (chunks.isEmpty()) return
@@ -132,8 +123,23 @@ class ReaderViewModel @Inject constructor(
                     val mimeType = getApplication<Application>().contentResolver.getType(uri) ?: "unknown"
                     val newDoc = DocumentEntity(title = result.title, fileUri = uri.toString(), mimeType = mimeType)
                     val id = readerDao.insertDocument(newDoc).toInt()
+
+                    // Save initial progress
                     readerDao.saveProgress(ProgressEntity(documentId = id, currentChunkIndex = 0, totalChunks = result.chunks.size))
                     progressCache[id] = 0
+
+                    // Cache parsed chunks (no re-parsing on next open!)
+                    cacheChunks(id, result.chunks)
+
+                    // Extract PDF thumbnail in background
+                    if (mimeType == "application/pdf" || result.title.endsWith(".pdf", ignoreCase = true)) {
+                        viewModelScope.launch {
+                            val thumbPath = documentParser.extractPdfThumbnail(uri, id)
+                            if (thumbPath != null) {
+                                readerDao.updateThumbnail(id, thumbPath)
+                            }
+                        }
+                    }
                 }
                 is ParseResult.Error -> {
                     _errorMessage.value = result.exception.message ?: "Failed to parse document"
@@ -149,35 +155,66 @@ class ReaderViewModel @Inject constructor(
             _errorMessage.value = null
             _currentDocument.value = document
 
-            val uri = Uri.parse(document.fileUri)
-            when (val result = documentParser.parseDocument(uri)) {
-                is ParseResult.Success -> {
-                    _textChunks.value = result.chunks
+            // Try to load from cache FIRST (instant — no re-parsing)
+            val cached = readerDao.getCachedChunks(document.id)
+            val chunks: List<String>
 
-                    // Resume position: check in-memory cache FIRST (instant, no race),
-                    // fall back to DB, then default to 0
-                    val startIndex = progressCache[document.id]
-                        ?: readerDao.getProgressForDocument(document.id)?.currentChunkIndex
-                        ?: 0
-
-                    ttsManager.loadText(result.chunks, startIndex)
-                    progressCache[document.id] = startIndex
-
-                    // Load bookmarks for this document
-                    bookmarkJob?.cancel()
-                    bookmarkJob = viewModelScope.launch {
-                        readerDao.getBookmarksForDocument(document.id).collect {
-                            _bookmarks.value = it
-                        }
+            if (cached != null) {
+                // FAST PATH: load from cache
+                chunks = deserializeChunks(cached.chunksJson)
+            } else {
+                // SLOW PATH: parse from file (first time only)
+                val uri = Uri.parse(document.fileUri)
+                when (val result = documentParser.parseDocument(uri)) {
+                    is ParseResult.Success -> {
+                        chunks = result.chunks
+                        // Cache for next time
+                        cacheChunks(document.id, chunks)
+                    }
+                    is ParseResult.Error -> {
+                        _errorMessage.value = result.exception.message ?: "Failed to open document"
+                        _textChunks.value = emptyList()
+                        _isLoading.value = false
+                        return@launch
                     }
                 }
-                is ParseResult.Error -> {
-                    _errorMessage.value = result.exception.message ?: "Failed to open document"
-                    _textChunks.value = emptyList()
+            }
+
+            _textChunks.value = chunks
+
+            // Resume from last position
+            val startIndex = progressCache[document.id]
+                ?: readerDao.getProgressForDocument(document.id)?.currentChunkIndex
+                ?: 0
+
+            ttsManager.loadText(chunks, startIndex)
+            progressCache[document.id] = startIndex
+
+            // Load bookmarks
+            bookmarkJob?.cancel()
+            bookmarkJob = viewModelScope.launch {
+                readerDao.getBookmarksForDocument(document.id).collect {
+                    _bookmarks.value = it
                 }
             }
+
             _isLoading.value = false
         }
+    }
+
+    // ─── Chunk caching (JSON serialization) ───
+    private suspend fun cacheChunks(docId: Int, chunks: List<String>) {
+        val jsonArray = JSONArray()
+        for (chunk in chunks) jsonArray.put(chunk)
+        readerDao.saveCachedChunks(CachedChunksEntity(
+            documentId = docId,
+            chunksJson = jsonArray.toString(),
+        ))
+    }
+
+    private fun deserializeChunks(json: String): List<String> {
+        val arr = JSONArray(json)
+        return (0 until arr.length()).map { arr.getString(it) }
     }
 
     // ─── Playback controls ───
@@ -234,15 +271,16 @@ class ReaderViewModel @Inject constructor(
             readerDao.deleteDocument(document.id)
             readerDao.deleteProgress(document.id)
             readerDao.deleteBookmarksForDocument(document.id)
+            readerDao.deleteCachedChunks(document.id)
             progressCache.remove(document.id)
+            // Clean up thumbnail
+            document.thumbnailPath?.let { java.io.File(it).delete() }
         }
     }
 
     fun clearError() { _errorMessage.value = null }
-
     fun stopPlayback() { ttsManager.pause() }
 
-    /** Save current progress synchronously to cache + async to DB */
     fun saveCurrentProgress() {
         val doc = _currentDocument.value ?: return
         val idx = currentChunkIndex.value
