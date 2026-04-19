@@ -11,18 +11,23 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.pdfreader.security.SecurityManager
+import com.example.pdfreader.tts.SleepTimerManager
 import com.example.pdfreader.ui.ReaderViewModel
-import com.example.pdfreader.ui.screens.LibraryScreen
-import com.example.pdfreader.ui.screens.PlayerScreen
-import com.example.pdfreader.ui.screens.SplashScreen
+import com.example.pdfreader.ui.screens.*
 import com.example.pdfreader.ui.theme.LumenTheme
 import dagger.hilt.android.AndroidEntryPoint
 
-enum class Screen { SPLASH, LIBRARY, PLAYER }
+enum class Screen { LOCK, SPLASH, LIBRARY, PLAYER, SETTINGS }
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -38,10 +43,36 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun NarratelyApp() {
+    val context = LocalContext.current
     val viewModel: ReaderViewModel = hiltViewModel()
-    var currentScreen by remember { mutableStateOf(Screen.SPLASH) }
+    val securityManager = remember { SecurityManager(context) }
+    val sleepTimerManager = remember { SleepTimerManager() }
 
-    // Collect all states
+    // Determine initial screen
+    val needsLock = securityManager.isAppLockEnabled
+    var currentScreen by remember { mutableStateOf(if (needsLock) Screen.LOCK else Screen.SPLASH) }
+
+    // Auto-lock when app goes to background
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    securityManager.lastBackgroundTimestamp = System.currentTimeMillis()
+                }
+                Lifecycle.Event.ON_START -> {
+                    if (securityManager.shouldLockOnResume() && currentScreen != Screen.LOCK) {
+                        currentScreen = Screen.LOCK
+                    }
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Collect states
     val documents by viewModel.libraryDocuments.collectAsState()
     val progressMap by viewModel.progressMap.collectAsState()
     val currentDocument by viewModel.currentDocument.collectAsState()
@@ -56,71 +87,93 @@ fun NarratelyApp() {
     val estimatedMinutes by viewModel.estimatedMinutes.collectAsState()
     val progressPercent by viewModel.progressPercent.collectAsState()
     val bookmarks by viewModel.bookmarks.collectAsState()
-    val fontSize by viewModel.fontSize.collectAsState()
-    val sleepTimerRemaining by viewModel.sleepTimerRemaining.collectAsState()
-    val isSleepTimerActive by viewModel.isSleepTimerActive.collectAsState()
-    val searchQuery by viewModel.searchQuery.collectAsState()
-    val searchResults by viewModel.searchResults.collectAsState()
-    val totalListeningHours by viewModel.totalListeningHours.collectAsState()
-    val totalChunksCompleted by viewModel.totalChunksCompleted.collectAsState()
+    val sleepActive by sleepTimerManager.isActive.collectAsState()
+    val sleepSeconds by sleepTimerManager.remainingSeconds.collectAsState()
+
+    val fontSize = securityManager.fontSize
 
     AnimatedContent(
         targetState = currentScreen,
         transitionSpec = {
             if (targetState.ordinal > initialState.ordinal) {
-                slideInVertically { it / 4 } + fadeIn(tween(350)) togetherWith slideOutVertically { -it / 8 } + fadeOut(tween(200))
+                slideInVertically { it / 4 } + fadeIn(tween(350)) togetherWith
+                    slideOutVertically { -it / 8 } + fadeOut(tween(200))
             } else {
-                slideInVertically { -it / 8 } + fadeIn(tween(350)) togetherWith slideOutVertically { it / 4 } + fadeOut(tween(200))
+                slideInVertically { -it / 8 } + fadeIn(tween(350)) togetherWith
+                    slideOutVertically { it / 4 } + fadeOut(tween(200))
             }
-        }, label = "nav",
+        },
+        label = "nav",
     ) { screen ->
         when (screen) {
-            Screen.SPLASH -> SplashScreen(onSplashFinished = { currentScreen = Screen.LIBRARY })
-            Screen.LIBRARY -> LibraryScreen(
-                documents = documents,
-                progressMap = progressMap,
-                isLoading = isLoading,
-                errorMessage = errorMessage,
-                totalListeningHours = totalListeningHours,
-                totalChunksCompleted = totalChunksCompleted,
-                onImportDocument = { viewModel.importDocument(it) },
-                onDocumentClick = { viewModel.openDocument(it); currentScreen = Screen.PLAYER },
-                onDeleteDocument = { viewModel.deleteDocument(it) },
-                onClearError = { viewModel.clearError() },
-            )
-            Screen.PLAYER -> PlayerScreen(
-                documentTitle = currentDocument?.title ?: "Document",
-                textChunks = textChunks,
-                currentChunkIndex = currentChunkIndex,
-                isPlaying = isPlaying,
-                isLoading = isLoading,
-                playbackSpeed = playbackSpeed,
-                pitch = pitch,
-                totalWords = totalWords,
-                estimatedMinutes = estimatedMinutes,
-                progressPercent = progressPercent,
-                bookmarks = bookmarks,
-                fontSize = fontSize,
-                sleepTimerRemaining = sleepTimerRemaining,
-                isSleepTimerActive = isSleepTimerActive,
-                searchQuery = searchQuery,
-                searchResults = searchResults,
-                onPlayPause = { viewModel.playPause() },
-                onSeekForward = { viewModel.seekForward() },
-                onSeekBackward = { viewModel.seekBackward() },
-                onSpeedChange = { viewModel.setSpeed(it) },
-                onPitchChange = { viewModel.setPitch(it) },
-                onSeekToChunk = { viewModel.seekToChunk(it) },
-                onAddBookmark = { viewModel.addBookmark() },
-                onDeleteBookmark = { viewModel.deleteBookmark(it) },
-                onJumpToBookmark = { viewModel.jumpToBookmark(it) },
-                onSetSleepTimer = { viewModel.setSleepTimer(it) },
-                onCancelSleepTimer = { viewModel.cancelSleepTimer() },
-                onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                onClearSearch = { viewModel.clearSearch() },
-                onFontSizeChange = { viewModel.setFontSize(it) },
-                onBack = { viewModel.saveCurrentProgress(); viewModel.stopPlayback(); currentScreen = Screen.LIBRARY },
-            )
+            Screen.LOCK -> {
+                LockScreen(
+                    securityManager = securityManager,
+                    onUnlocked = { currentScreen = Screen.SPLASH },
+                )
+            }
+            Screen.SPLASH -> {
+                SplashScreen(onSplashFinished = { currentScreen = Screen.LIBRARY })
+            }
+            Screen.LIBRARY -> {
+                LibraryScreen(
+                    documents = documents,
+                    progressMap = progressMap,
+                    isLoading = isLoading,
+                    errorMessage = errorMessage,
+                    onImportDocument = { uri -> viewModel.importDocument(uri) },
+                    onDocumentClick = { doc ->
+                        viewModel.openDocument(doc)
+                        viewModel.setSpeed(securityManager.defaultSpeed)
+                        viewModel.setPitch(securityManager.defaultPitch)
+                        currentScreen = Screen.PLAYER
+                    },
+                    onDeleteDocument = { doc -> viewModel.deleteDocument(doc) },
+                    onClearError = { viewModel.clearError() },
+                    onOpenSettings = { currentScreen = Screen.SETTINGS },
+                )
+            }
+            Screen.PLAYER -> {
+                PlayerScreen(
+                    documentTitle = currentDocument?.title ?: "Document",
+                    textChunks = textChunks,
+                    currentChunkIndex = currentChunkIndex,
+                    isPlaying = isPlaying,
+                    isLoading = isLoading,
+                    playbackSpeed = playbackSpeed,
+                    pitch = pitch,
+                    totalWords = totalWords,
+                    estimatedMinutes = estimatedMinutes,
+                    progressPercent = progressPercent,
+                    bookmarks = bookmarks,
+                    fontSize = fontSize,
+                    sleepTimerActive = sleepActive,
+                    sleepTimerRemaining = sleepTimerManager.formatRemaining(),
+                    onPlayPause = { viewModel.playPause() },
+                    onSeekForward = { viewModel.seekForward() },
+                    onSeekBackward = { viewModel.seekBackward() },
+                    onSpeedChange = { viewModel.setSpeed(it) },
+                    onPitchChange = { viewModel.setPitch(it) },
+                    onSeekToChunk = { viewModel.seekToChunk(it) },
+                    onAddBookmark = { viewModel.addBookmark() },
+                    onDeleteBookmark = { viewModel.deleteBookmark(it) },
+                    onJumpToBookmark = { viewModel.jumpToBookmark(it) },
+                    onStartSleepTimer = { min -> sleepTimerManager.start(min) { viewModel.stopPlayback() } },
+                    onCancelSleepTimer = { sleepTimerManager.cancel() },
+                    onBack = {
+                        viewModel.saveCurrentProgress()
+                        viewModel.stopPlayback()
+                        sleepTimerManager.cancel()
+                        currentScreen = Screen.LIBRARY
+                    },
+                )
+            }
+            Screen.SETTINGS -> {
+                SettingsScreen(
+                    securityManager = securityManager,
+                    onBack = { currentScreen = Screen.LIBRARY },
+                )
+            }
         }
     }
 }

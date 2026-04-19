@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.pdfreader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 3
-        versionName = "3.0"
+        versionCode = 4
+        versionName = "4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -72,8 +72,23 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
-    // PDFBox (for PDF extraction)
+    // PDFBox (for PDF extraction + thumbnails)
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+
+    // Biometric auth (fingerprint + face)
+    implementation("androidx.biometric:biometric:1.1.0")
+
+    // Encrypted SharedPreferences (PIN storage)
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
+
+    // Color extraction from thumbnails
+    implementation("androidx.palette:palette-ktx:1.0.0")
+
+    // Media session (background playback + notification controls)
+    implementation("androidx.media:media:1.7.0")
+
+    // Lifecycle process (auto-lock on background)
+    implementation("androidx.lifecycle:lifecycle-process:2.6.2")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.1.5")

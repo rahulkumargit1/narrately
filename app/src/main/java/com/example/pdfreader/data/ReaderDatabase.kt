@@ -9,9 +9,8 @@ import androidx.room.RoomDatabase
         ProgressEntity::class,
         BookmarkEntity::class,
         CachedChunksEntity::class,
-        ListeningStatsEntity::class,
     ],
-    version = 4,
+    version = 3,
     exportSchema = false,
 )
 abstract class ReaderDatabase : RoomDatabase() {

@@ -53,20 +53,4 @@ interface ReaderDao {
 
     @Query("DELETE FROM cached_chunks WHERE documentId = :documentId")
     suspend fun deleteCachedChunks(documentId: Int)
-
-    // ─── Listening Stats ───
-    @Query("SELECT * FROM listening_stats WHERE date = :date")
-    suspend fun getStatsForDate(date: String): ListeningStatsEntity?
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun saveStats(stats: ListeningStatsEntity)
-
-    @Query("SELECT SUM(totalSecondsListened) FROM listening_stats")
-    suspend fun getTotalListeningSeconds(): Long?
-
-    @Query("SELECT SUM(chunksCompleted) FROM listening_stats")
-    suspend fun getTotalChunksCompleted(): Long?
-
-    @Query("SELECT * FROM listening_stats ORDER BY date DESC LIMIT 7")
-    suspend fun getRecentStats(): List<ListeningStatsEntity>
 }

@@ -34,15 +34,6 @@ data class BookmarkEntity(
 @Entity(tableName = "cached_chunks")
 data class CachedChunksEntity(
     @PrimaryKey val documentId: Int,
-    val chunksJson: String,
+    val chunksJson: String,   // JSON array of chunk strings
     val parsedTimestamp: Long = System.currentTimeMillis()
-)
-
-/** Listening stats — tracks total time spent listening */
-@Entity(tableName = "listening_stats")
-data class ListeningStatsEntity(
-    @PrimaryKey val date: String,   // "2026-04-19" format
-    val totalSecondsListened: Long = 0,
-    val documentsOpened: Int = 0,
-    val chunksCompleted: Int = 0,
 )
