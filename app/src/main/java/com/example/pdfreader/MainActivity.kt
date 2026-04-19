@@ -32,6 +32,9 @@ import com.example.pdfreader.tts.SleepTimerManager
 import com.example.pdfreader.ui.ReaderViewModel
 import com.example.pdfreader.ui.screens.*
 import com.example.pdfreader.ui.theme.LumenTheme
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import dagger.hilt.android.AndroidEntryPoint
 
 enum class Screen { ONBOARDING, LOCK, SPLASH, LIBRARY, PLAYER, SETTINGS, STATS }
@@ -39,16 +42,16 @@ enum class Screen { ONBOARDING, LOCK, SPLASH, LIBRARY, PLAYER, SETTINGS, STATS }
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
 
-    private var playbackService: MediaPlaybackService? = null
+    private val _playbackService = MutableStateFlow<MediaPlaybackService?>(null)
     private var serviceBound = false
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
-            playbackService = (binder as? MediaPlaybackService.LocalBinder)?.getService()
+            _playbackService.value = (binder as? MediaPlaybackService.LocalBinder)?.getService()
             serviceBound = true
         }
         override fun onServiceDisconnected(name: ComponentName?) {
-            playbackService = null
+            _playbackService.value = null
             serviceBound = false
         }
     }
@@ -73,8 +76,9 @@ class MainActivity : FragmentActivity() {
         setContent {
             LumenTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    val currentService by _playbackService.collectAsState()
                     NarratelyApp(
-                        getPlaybackService = { playbackService },
+                        getPlaybackService = { currentService },
                         startService = { startAndBindService() },
                         stopService = { stopAndUnbindService() },
                     )
@@ -94,7 +98,7 @@ class MainActivity : FragmentActivity() {
             serviceBound = false
         }
         MediaPlaybackService.stop(this)
-        playbackService = null
+        _playbackService.value = null
     }
 
     override fun onDestroy() {
