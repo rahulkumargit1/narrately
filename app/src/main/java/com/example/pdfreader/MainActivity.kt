@@ -1,7 +1,7 @@
 package com.example.pdfreader
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
@@ -12,11 +12,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.example.pdfreader.security.SecurityManager
 import com.example.pdfreader.tts.SleepTimerManager
 import com.example.pdfreader.ui.ReaderViewModel
@@ -24,13 +24,20 @@ import com.example.pdfreader.ui.screens.*
 import com.example.pdfreader.ui.theme.LumenTheme
 import dagger.hilt.android.AndroidEntryPoint
 
-enum class Screen { LOCK, SPLASH, LIBRARY, PLAYER, SETTINGS }
+enum class Screen { ONBOARDING, LOCK, SPLASH, LIBRARY, PLAYER, SETTINGS, STATS }
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Prevent screenshots when app lock is enabled
+        val secMgr = SecurityManager(this)
+        if (secMgr.isAppLockEnabled) {
+            window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        }
+
         setContent {
             LumenTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -49,8 +56,14 @@ fun NarratelyApp() {
     val sleepTimerManager = remember { SleepTimerManager() }
 
     // Determine initial screen
-    val needsLock = securityManager.isAppLockEnabled
-    var currentScreen by remember { mutableStateOf(if (needsLock) Screen.LOCK else Screen.SPLASH) }
+    val initialScreen = remember {
+        when {
+            !securityManager.hasCompletedOnboarding -> Screen.ONBOARDING
+            securityManager.isAppLockEnabled -> Screen.LOCK
+            else -> Screen.SPLASH
+        }
+    }
+    var currentScreen by remember { mutableStateOf(initialScreen) }
 
     // Auto-lock when app goes to background
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -61,7 +74,7 @@ fun NarratelyApp() {
                     securityManager.lastBackgroundTimestamp = System.currentTimeMillis()
                 }
                 Lifecycle.Event.ON_START -> {
-                    if (securityManager.shouldLockOnResume() && currentScreen != Screen.LOCK) {
+                    if (securityManager.shouldLockOnResume() && currentScreen != Screen.LOCK && currentScreen != Screen.ONBOARDING) {
                         currentScreen = Screen.LOCK
                     }
                 }
@@ -90,6 +103,12 @@ fun NarratelyApp() {
     val sleepActive by sleepTimerManager.isActive.collectAsState()
     val sleepSeconds by sleepTimerManager.remainingSeconds.collectAsState()
 
+    // Stats
+    val totalListeningSeconds by viewModel.totalListeningSeconds.collectAsState()
+    val listeningDays by viewModel.listeningDays.collectAsState()
+    val completedDocs by viewModel.completedDocs.collectAsState()
+    val weeklyStats by viewModel.weeklyStats.collectAsState()
+
     val fontSize = securityManager.fontSize
 
     AnimatedContent(
@@ -106,6 +125,12 @@ fun NarratelyApp() {
         label = "nav",
     ) { screen ->
         when (screen) {
+            Screen.ONBOARDING -> {
+                OnboardingScreen(onFinished = {
+                    securityManager.hasCompletedOnboarding = true
+                    currentScreen = if (securityManager.isAppLockEnabled) Screen.LOCK else Screen.SPLASH
+                })
+            }
             Screen.LOCK -> {
                 LockScreen(
                     securityManager = securityManager,
@@ -131,6 +156,7 @@ fun NarratelyApp() {
                     onDeleteDocument = { doc -> viewModel.deleteDocument(doc) },
                     onClearError = { viewModel.clearError() },
                     onOpenSettings = { currentScreen = Screen.SETTINGS },
+                    onOpenStats = { viewModel.refreshStats(); currentScreen = Screen.STATS },
                 )
             }
             Screen.PLAYER -> {
@@ -171,6 +197,15 @@ fun NarratelyApp() {
             Screen.SETTINGS -> {
                 SettingsScreen(
                     securityManager = securityManager,
+                    onBack = { currentScreen = Screen.LIBRARY },
+                )
+            }
+            Screen.STATS -> {
+                ListeningStatsScreen(
+                    totalSeconds = totalListeningSeconds,
+                    listeningDays = listeningDays,
+                    completedDocs = completedDocs,
+                    weeklyStats = weeklyStats,
                     onBack = { currentScreen = Screen.LIBRARY },
                 )
             }

@@ -31,6 +31,9 @@ interface ReaderDao {
     @Query("DELETE FROM reading_progress WHERE documentId = :documentId")
     suspend fun deleteProgress(documentId: Int)
 
+    @Query("SELECT * FROM reading_progress")
+    suspend fun getAllProgress(): List<ProgressEntity>
+
     // ─── Bookmarks ───
     @Query("SELECT * FROM bookmarks WHERE documentId = :documentId ORDER BY chunkIndex ASC")
     fun getBookmarksForDocument(documentId: Int): Flow<List<BookmarkEntity>>
@@ -53,4 +56,28 @@ interface ReaderDao {
 
     @Query("DELETE FROM cached_chunks WHERE documentId = :documentId")
     suspend fun deleteCachedChunks(documentId: Int)
+
+    // ─── Listening Sessions ───
+    @Insert
+    suspend fun insertListeningSession(session: ListeningSessionEntity)
+
+    @Query("SELECT SUM(durationSeconds) FROM listening_sessions")
+    suspend fun getTotalListeningSeconds(): Long?
+
+    @Query("SELECT COUNT(DISTINCT dateKey) FROM listening_sessions")
+    suspend fun getListeningDaysCount(): Int
+
+    @Query("SELECT SUM(durationSeconds) as total FROM listening_sessions WHERE dateKey = :dateKey")
+    suspend fun getListeningSecondsForDate(dateKey: String): Long?
+
+    @Query("SELECT dateKey, SUM(durationSeconds) as total FROM listening_sessions GROUP BY dateKey ORDER BY dateKey DESC LIMIT 7")
+    suspend fun getWeeklyStats(): List<DailyStatRow>
+
+    @Query("SELECT COUNT(DISTINCT documentId) FROM reading_progress WHERE currentChunkIndex >= totalChunks - 1")
+    suspend fun getCompletedDocumentsCount(): Int
+
+    @Query("DELETE FROM listening_sessions WHERE documentId = :documentId")
+    suspend fun deleteListeningSessionsForDocument(documentId: Int)
 }
+
+data class DailyStatRow(val dateKey: String, val total: Long)

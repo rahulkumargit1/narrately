@@ -13,6 +13,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import org.json.JSONArray
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 
 @HiltViewModel
@@ -77,6 +79,23 @@ class ReaderViewModel @Inject constructor(
     // ─── In-memory progress cache (fixes resume race condition) ───
     private val progressCache = mutableMapOf<Int, Int>()
 
+    // ─── Session tracking ───
+    private var sessionStartTime: Long = 0L
+    private var sessionStartChunk: Int = 0
+
+    // ─── Listening Stats (exposed) ───
+    private val _totalListeningSeconds = MutableStateFlow(0L)
+    val totalListeningSeconds: StateFlow<Long> = _totalListeningSeconds.asStateFlow()
+
+    private val _listeningDays = MutableStateFlow(0)
+    val listeningDays: StateFlow<Int> = _listeningDays.asStateFlow()
+
+    private val _completedDocs = MutableStateFlow(0)
+    val completedDocs: StateFlow<Int> = _completedDocs.asStateFlow()
+
+    private val _weeklyStats = MutableStateFlow<List<DailyStatRow>>(emptyList())
+    val weeklyStats: StateFlow<List<DailyStatRow>> = _weeklyStats.asStateFlow()
+
     init {
         viewModelScope.launch {
             libraryDocuments.collect { docs ->
@@ -93,6 +112,17 @@ class ReaderViewModel @Inject constructor(
                 progressCache[doc.id] = idx
                 persistProgress(doc.id, idx)
             }
+        }
+        // Load stats once
+        refreshStats()
+    }
+
+    fun refreshStats() {
+        viewModelScope.launch {
+            _totalListeningSeconds.value = readerDao.getTotalListeningSeconds() ?: 0L
+            _listeningDays.value = readerDao.getListeningDaysCount()
+            _completedDocs.value = readerDao.getCompletedDocumentsCount()
+            _weeklyStats.value = readerDao.getWeeklyStats()
         }
     }
 
@@ -160,15 +190,12 @@ class ReaderViewModel @Inject constructor(
             val chunks: List<String>
 
             if (cached != null) {
-                // FAST PATH: load from cache
                 chunks = deserializeChunks(cached.chunksJson)
             } else {
-                // SLOW PATH: parse from file (first time only)
                 val uri = Uri.parse(document.fileUri)
                 when (val result = documentParser.parseDocument(uri)) {
                     is ParseResult.Success -> {
                         chunks = result.chunks
-                        // Cache for next time
                         cacheChunks(document.id, chunks)
                     }
                     is ParseResult.Error -> {
@@ -189,6 +216,10 @@ class ReaderViewModel @Inject constructor(
 
             ttsManager.loadText(chunks, startIndex)
             progressCache[document.id] = startIndex
+
+            // Start listening session timer
+            sessionStartTime = System.currentTimeMillis()
+            sessionStartChunk = startIndex
 
             // Load bookmarks
             bookmarkJob?.cancel()
@@ -272,14 +303,18 @@ class ReaderViewModel @Inject constructor(
             readerDao.deleteProgress(document.id)
             readerDao.deleteBookmarksForDocument(document.id)
             readerDao.deleteCachedChunks(document.id)
+            readerDao.deleteListeningSessionsForDocument(document.id)
             progressCache.remove(document.id)
-            // Clean up thumbnail
             document.thumbnailPath?.let { java.io.File(it).delete() }
         }
     }
 
     fun clearError() { _errorMessage.value = null }
-    fun stopPlayback() { ttsManager.pause() }
+
+    fun stopPlayback() {
+        ttsManager.pause()
+        saveListeningSession()
+    }
 
     fun saveCurrentProgress() {
         val doc = _currentDocument.value ?: return
@@ -288,8 +323,31 @@ class ReaderViewModel @Inject constructor(
         persistProgress(doc.id, idx)
     }
 
+    private fun saveListeningSession() {
+        val doc = _currentDocument.value ?: return
+        val elapsed = (System.currentTimeMillis() - sessionStartTime) / 1000
+        if (elapsed < 5) return  // Ignore tiny sessions
+        val chunksListened = (currentChunkIndex.value - sessionStartChunk).coerceAtLeast(0)
+        val dateKey = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+        viewModelScope.launch {
+            readerDao.insertListeningSession(ListeningSessionEntity(
+                documentId = doc.id,
+                documentTitle = doc.title,
+                startTimestamp = sessionStartTime,
+                durationSeconds = elapsed,
+                chunksListened = chunksListened,
+                dateKey = dateKey,
+            ))
+            refreshStats()
+        }
+        // Reset for next session
+        sessionStartTime = System.currentTimeMillis()
+        sessionStartChunk = currentChunkIndex.value
+    }
+
     override fun onCleared() {
         saveCurrentProgress()
+        saveListeningSession()
         ttsManager.shutdown()
         super.onCleared()
     }

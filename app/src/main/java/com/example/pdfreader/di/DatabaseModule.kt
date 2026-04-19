@@ -23,7 +23,11 @@ object DatabaseModule {
             ReaderDatabase::class.java,
             "reader_database"
         )
-            .fallbackToDestructiveMigration()
+            .addMigrations(
+                ReaderDatabase.MIGRATION_3_4,
+                ReaderDatabase.MIGRATION_4_5,
+            )
+            .fallbackToDestructiveMigration()  // Only for legacy v1/v2 users
             .build()
     }
 

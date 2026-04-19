@@ -8,6 +8,7 @@ import androidx.security.crypto.MasterKeys
 /**
  * Manages app lock security — PIN code stored in encrypted preferences,
  * with biometric as the primary unlock method.
+ * Includes brute-force protection (lockout after 5 wrong attempts).
  */
 class SecurityManager(context: Context) {
 
@@ -22,7 +23,6 @@ class SecurityManager(context: Context) {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
             )
         } catch (_: Exception) {
-            // Fallback to regular prefs if encryption fails (old devices)
             context.getSharedPreferences("narrately_secure_prefs_fallback", Context.MODE_PRIVATE)
         }
     }
@@ -43,6 +43,11 @@ class SecurityManager(context: Context) {
     var autoLockTimeoutSeconds: Int
         get() = prefs.getInt(KEY_TIMEOUT, 30)
         set(value) = prefs.edit().putInt(KEY_TIMEOUT, value).apply()
+
+    // ─── Onboarding ───
+    var hasCompletedOnboarding: Boolean
+        get() = prefs.getBoolean(KEY_ONBOARDING, false)
+        set(value) = prefs.edit().putBoolean(KEY_ONBOARDING, value).apply()
 
     // ─── User Preferences (non-sensitive) ───
     var defaultSpeed: Float
@@ -68,19 +73,48 @@ class SecurityManager(context: Context) {
         return elapsed > autoLockTimeoutSeconds * 1000L
     }
 
+    // ─── Brute force protection ───
+    private var failedAttempts: Int
+        get() = prefs.getInt(KEY_FAILED_ATTEMPTS, 0)
+        set(value) = prefs.edit().putInt(KEY_FAILED_ATTEMPTS, value).apply()
+
+    private var lockoutUntil: Long
+        get() = prefs.getLong(KEY_LOCKOUT_UNTIL, 0L)
+        set(value) = prefs.edit().putLong(KEY_LOCKOUT_UNTIL, value).apply()
+
+    val isLockedOut: Boolean
+        get() = System.currentTimeMillis() < lockoutUntil
+
+    val lockoutRemainingSeconds: Int
+        get() = ((lockoutUntil - System.currentTimeMillis()) / 1000).toInt().coerceAtLeast(0)
+
     fun verifyPin(entered: String): Boolean {
-        return pinCode == entered
+        if (isLockedOut) return false
+        return if (pinCode == entered) {
+            failedAttempts = 0
+            true
+        } else {
+            failedAttempts += 1
+            if (failedAttempts >= MAX_ATTEMPTS) {
+                lockoutUntil = System.currentTimeMillis() + LOCKOUT_DURATION_MS
+                failedAttempts = 0
+            }
+            false
+        }
     }
 
     fun setupLock(pin: String, biometric: Boolean) {
         pinCode = pin
         useBiometric = biometric
         isAppLockEnabled = true
+        failedAttempts = 0
     }
 
     fun removeLock() {
         isAppLockEnabled = false
         pinCode = null
+        failedAttempts = 0
+        lockoutUntil = 0L
     }
 
     companion object {
@@ -92,5 +126,11 @@ class SecurityManager(context: Context) {
         private const val KEY_DEFAULT_PITCH = "default_pitch"
         private const val KEY_FONT_SIZE = "font_size"
         private const val KEY_LAST_BG = "last_background_ts"
+        private const val KEY_ONBOARDING = "onboarding_complete"
+        private const val KEY_FAILED_ATTEMPTS = "failed_pin_attempts"
+        private const val KEY_LOCKOUT_UNTIL = "lockout_until"
+
+        private const val MAX_ATTEMPTS = 5
+        private const val LOCKOUT_DURATION_MS = 60_000L  // 1 minute lockout
     }
 }

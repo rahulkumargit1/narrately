@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
@@ -55,6 +56,7 @@ fun LibraryScreen(
     onDeleteDocument: (DocumentEntity) -> Unit,
     onClearError: () -> Unit,
     onOpenSettings: () -> Unit = {},
+    onOpenStats: () -> Unit = {},
 ) {
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -135,7 +137,10 @@ fun LibraryScreen(
                             Spacer(modifier = Modifier.height(2.dp))
                             Text("Listen Now", style = MaterialTheme.typography.headlineLarge.copy(fontSize = 34.sp), color = OnBackground, fontWeight = FontWeight.Bold)
                         }
-                        androidx.compose.material3.IconButton(onClick = onOpenSettings) {
+                        IconButton(onClick = onOpenStats) {
+                            Icon(Icons.Default.BarChart, "Stats", tint = OnSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
+                        }
+                        IconButton(onClick = onOpenSettings) {
                             Icon(Icons.Default.Settings, "Settings", tint = OnSurfaceVariant.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
                         }
                     }

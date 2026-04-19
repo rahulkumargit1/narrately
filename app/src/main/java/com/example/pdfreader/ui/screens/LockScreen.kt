@@ -97,7 +97,13 @@ fun LockScreen(
             Spacer(modifier = Modifier.height(16.dp))
             Text("Narrately", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = OnBackground, letterSpacing = 1.sp)
             Spacer(modifier = Modifier.height(6.dp))
-            Text("Enter PIN to unlock", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant.copy(alpha = 0.5f))
+            if (securityManager.isLockedOut) {
+                Text("Too many attempts", style = MaterialTheme.typography.bodySmall, color = Error, fontWeight = FontWeight.SemiBold)
+                Spacer(modifier = Modifier.height(2.dp))
+                Text("Try again in ${securityManager.lockoutRemainingSeconds}s", style = MaterialTheme.typography.bodySmall, color = Error.copy(alpha = 0.6f))
+            } else {
+                Text("Enter PIN to unlock", style = MaterialTheme.typography.bodySmall, color = OnSurfaceVariant.copy(alpha = 0.5f))
+            }
 
             Spacer(modifier = Modifier.height(36.dp))
 

@@ -37,3 +37,15 @@ data class CachedChunksEntity(
     val chunksJson: String,   // JSON array of chunk strings
     val parsedTimestamp: Long = System.currentTimeMillis()
 )
+
+/** Tracks individual listening sessions for stats */
+@Entity(tableName = "listening_sessions")
+data class ListeningSessionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val documentId: Int,
+    val documentTitle: String,
+    val startTimestamp: Long,
+    val durationSeconds: Long,
+    val chunksListened: Int,
+    val dateKey: String,  // "2026-04-19" for daily grouping
+)
