@@ -16,7 +16,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.example.pdfreader.security.SecurityManager
 import com.example.pdfreader.tts.SleepTimerManager
 import com.example.pdfreader.ui.ReaderViewModel
