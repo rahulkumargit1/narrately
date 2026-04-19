@@ -177,13 +177,14 @@ fun NarratelyApp(
 
     val fontSize = securityManager.fontSize
 
+    val currentService = getPlaybackService()
+    
     // Update notification when playback state changes
-    LaunchedEffect(isPlaying, currentDocument, currentChunkIndex) {
-        val service = getPlaybackService()
+    LaunchedEffect(isPlaying, currentDocument, currentChunkIndex, currentService) {
         val doc = currentDocument
-        if (service != null && doc != null) {
+        if (currentService != null && doc != null) {
             val progress = if (textChunks.isNotEmpty()) "${currentChunkIndex + 1}/${textChunks.size}" else ""
-            service.updateNotification(
+            currentService.updateNotification(
                 doc.title.removeSuffix(".pdf").removeSuffix(".txt"),
                 if (isPlaying) "Playing • $progress" else "Paused • $progress",
                 isPlaying,
@@ -192,13 +193,15 @@ fun NarratelyApp(
     }
 
     // Wire service callbacks
-    LaunchedEffect(currentScreen) {
-        if (currentScreen == Screen.PLAYER) {
-            val service = getPlaybackService()
-            service?.onPlayPause = { viewModel.playPause() }
-            service?.onNext = { viewModel.seekForward() }
-            service?.onPrev = { viewModel.seekBackward() }
-            service?.onStop = { viewModel.stopPlayback() }
+    LaunchedEffect(currentScreen, currentService) {
+        if (currentScreen == Screen.PLAYER && currentService != null) {
+            currentService.onPlayPause = { viewModel.playPause() }
+            currentService.onNext = { viewModel.seekForward() }
+            currentService.onPrev = { viewModel.seekBackward() }
+            currentService.onStop = { 
+                viewModel.stopPlayback()
+                stopService()
+            }
         }
     }
 
