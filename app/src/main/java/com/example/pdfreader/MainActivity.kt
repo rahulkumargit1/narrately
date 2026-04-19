@@ -1,9 +1,18 @@
 package com.example.pdfreader
 
+import android.Manifest
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,6 +27,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.pdfreader.security.SecurityManager
+import com.example.pdfreader.tts.MediaPlaybackService
 import com.example.pdfreader.tts.SleepTimerManager
 import com.example.pdfreader.ui.ReaderViewModel
 import com.example.pdfreader.ui.screens.*
@@ -28,6 +38,21 @@ enum class Screen { ONBOARDING, LOCK, SPLASH, LIBRARY, PLAYER, SETTINGS, STATS }
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
+
+    private var playbackService: MediaPlaybackService? = null
+    private var serviceBound = false
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            playbackService = (binder as? MediaPlaybackService.LocalBinder)?.getService()
+            serviceBound = true
+        }
+        override fun onServiceDisconnected(name: ComponentName?) {
+            playbackService = null
+            serviceBound = false
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -38,18 +63,55 @@ class MainActivity : FragmentActivity() {
             window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         }
 
+        // Request notification permission on Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                registerForActivityResult(ActivityResultContracts.RequestPermission()) {}.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+
         setContent {
             LumenTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    NarratelyApp()
+                    NarratelyApp(
+                        getPlaybackService = { playbackService },
+                        startService = { startAndBindService() },
+                        stopService = { stopAndUnbindService() },
+                    )
                 }
             }
         }
     }
+
+    private fun startAndBindService() {
+        MediaPlaybackService.start(this)
+        bindService(Intent(this, MediaPlaybackService::class.java), serviceConnection, Context.BIND_AUTO_CREATE)
+    }
+
+    private fun stopAndUnbindService() {
+        if (serviceBound) {
+            unbindService(serviceConnection)
+            serviceBound = false
+        }
+        MediaPlaybackService.stop(this)
+        playbackService = null
+    }
+
+    override fun onDestroy() {
+        if (serviceBound) {
+            unbindService(serviceConnection)
+            serviceBound = false
+        }
+        super.onDestroy()
+    }
 }
 
 @Composable
-fun NarratelyApp() {
+fun NarratelyApp(
+    getPlaybackService: () -> MediaPlaybackService?,
+    startService: () -> Unit,
+    stopService: () -> Unit,
+) {
     val context = LocalContext.current
     val viewModel: ReaderViewModel = hiltViewModel()
     val securityManager = remember { SecurityManager(context) }
@@ -111,6 +173,31 @@ fun NarratelyApp() {
 
     val fontSize = securityManager.fontSize
 
+    // Update notification when playback state changes
+    LaunchedEffect(isPlaying, currentDocument, currentChunkIndex) {
+        val service = getPlaybackService()
+        val doc = currentDocument
+        if (service != null && doc != null) {
+            val progress = if (textChunks.isNotEmpty()) "${currentChunkIndex + 1}/${textChunks.size}" else ""
+            service.updateNotification(
+                doc.title.removeSuffix(".pdf").removeSuffix(".txt"),
+                if (isPlaying) "Playing • $progress" else "Paused • $progress",
+                isPlaying,
+            )
+        }
+    }
+
+    // Wire service callbacks
+    LaunchedEffect(currentScreen) {
+        if (currentScreen == Screen.PLAYER) {
+            val service = getPlaybackService()
+            service?.onPlayPause = { viewModel.playPause() }
+            service?.onNext = { viewModel.seekForward() }
+            service?.onPrev = { viewModel.seekBackward() }
+            service?.onStop = { viewModel.stopPlayback() }
+        }
+    }
+
     AnimatedContent(
         targetState = currentScreen,
         transitionSpec = {
@@ -151,6 +238,8 @@ fun NarratelyApp() {
                         viewModel.openDocument(doc)
                         viewModel.setSpeed(securityManager.defaultSpeed)
                         viewModel.setPitch(securityManager.defaultPitch)
+                        // Start background playback service
+                        startService()
                         currentScreen = Screen.PLAYER
                     },
                     onDeleteDocument = { doc -> viewModel.deleteDocument(doc) },
@@ -190,6 +279,7 @@ fun NarratelyApp() {
                         viewModel.saveCurrentProgress()
                         viewModel.stopPlayback()
                         sleepTimerManager.cancel()
+                        stopService()
                         currentScreen = Screen.LIBRARY
                     },
                 )
